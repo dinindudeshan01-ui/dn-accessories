@@ -1,0 +1,25 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --pink: #f472b6;
+  --pink-dark: #ec4899;
+  --pink-light: #fce7f3;
+  --gold: #d4a853;
+  --gold-light: #f5e6c8;
+  --stone: #1c1917;
+  --stone-mid: #57534e;
+  --stone-light: #f5f5f4;
+  --white: #ffffff;
+  --serif: 'Playfair Display', Georgia, serif;
+  --sans: 'DM Sans', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body { font-family: var(--sans); color: var(--stone); background: var(--white); overflow-x: hidden; }
+img { display: block; width: 100%; }
+a { text-decoration: none; color: inherit; }
+button { cursor: pointer; border: none; font-family: var(--sans); }
+
+@keyframes shimmer { 0%{background-position:0%} 100%{background-position:200%} }
+@keyframes pop { 0%{transform:scale(0)} 70%{transform:scale(1.2)} 100%{transform:scale(1)} }
+@keyframes pulse { 0%,100%{transform:scale(1);opacity:0.7} 50%{transform:scale(1.15);opacity:0.4} }
