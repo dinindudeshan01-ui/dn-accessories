@@ -1,5 +1,3 @@
-// src/pages/admin/AdminAuditLog.jsx
-
 import { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
@@ -42,10 +40,17 @@ export default function AdminAuditLog() {
     } finally { setLoading(false) }
   }
 
+  async function clearLogs() {
+    if (!window.confirm('Clear all audit logs? This cannot be undone.')) return
+    await adminApi.delete('/system/audit/clear')
+    loadLogs()
+    loadStats()
+  }
+
   function setFilter(key, val) { setFilters(f => ({...f, [key]:val})) }
 
   function formatTime(ts) {
-    const d = new Date(ts)
+    const d = new Date(ts.includes('T') ? ts : ts + 'Z')
     return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' ' +
            d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
   }
@@ -55,7 +60,14 @@ export default function AdminAuditLog() {
       <PageHeader
         title="Audit Trail"
         subtitle="Tamper-proof admin log"
-        action={<span style={{ fontSize:11, color:T.muted }}>{logs.length} records</span>}
+        action={
+          <button onClick={clearLogs} style={{
+            padding:'7px 16px', background:'rgba(255,45,120,0.12)', border:'1px solid rgba(255,45,120,0.3)',
+            borderRadius:8, color:'#ff2d78', fontSize:12, fontWeight:700, cursor:'pointer'
+          }}>
+            Clear Log
+          </button>
+        }
       />
       <PageContent>
 
