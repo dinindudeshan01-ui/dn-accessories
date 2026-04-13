@@ -2,22 +2,23 @@ import { useState, useEffect } from 'react'
 import api from '../lib/api'
 import { useCart } from '../context/CartContext'
 
-// ── Group products by name patterns ──────────────────────
+// ── Group products by subcategory from DB ──────────────────
 function groupProducts(products) {
-  const groups = [
-    { key: 'butterfly', label: 'Butterfly Charms',     match: p => /butterfly/i.test(p.name) },
-    { key: 'shell',     label: 'Shell Charms',         match: p => /shell/i.test(p.name) },
-    { key: 'daisy',     label: 'Daisy & Flower Charms',match: p => /daisy|flower/i.test(p.name) },
-    { key: 'premium',   label: 'Premium Charms',       match: p => p.price >= 100 },
-    { key: 'other',     label: 'More Charms',          match: () => true },
-  ]
+  const groups = {}
+  const noGroup = []
 
-  const assigned = new Set()
-  return groups.map(g => {
-    const items = products.filter(p => !assigned.has(p.id) && g.match(p))
-    items.forEach(p => assigned.add(p.id))
-    return { ...g, items }
-  }).filter(g => g.items.length > 0)
+  products.forEach(p => {
+    if (p.subcategory && p.subcategory.trim() !== '') {
+      if (!groups[p.subcategory]) groups[p.subcategory] = []
+      groups[p.subcategory].push(p)
+    } else {
+      noGroup.push(p)
+    }
+  })
+
+  const result = Object.entries(groups).map(([label, items]) => ({ key: label, label, items }))
+  if (noGroup.length > 0) result.push({ key: 'other', label: 'Other', items: noGroup })
+  return result
 }
 
 export default function CatalogPage() {
@@ -58,7 +59,6 @@ export default function CatalogPage() {
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '60px 24px' }}>
 
-      {/* Page header */}
       <div style={{ textAlign: 'center', marginBottom: 64 }}>
         <h1 style={{ fontFamily: 'var(--serif)', fontSize: 40, fontWeight: 900, fontStyle: 'italic', marginBottom: 12 }}>
           Our Collection
@@ -73,10 +73,8 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {!loading && groups.map((group, gi) => (
+      {!loading && groups.map((group) => (
         <div key={group.key} style={{ marginBottom: 72 }}>
-
-          {/* Section header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32 }}>
             <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg,#fce7f3,transparent)' }} />
             <div style={{ textAlign: 'center' }}>
@@ -93,7 +91,6 @@ export default function CatalogPage() {
             <div style={{ flex: 1, height: 1, background: 'linear-gradient(270deg,#fce7f3,transparent)' }} />
           </div>
 
-          {/* Product grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 28 }}>
             {group.items.map(product => (
               <ProductCard
@@ -264,7 +261,7 @@ function ProductModal({ product, added, onAdd, onClose }) {
               textTransform: 'uppercase', padding: '5px 12px', borderRadius: 999,
               boxShadow: '0 2px 12px rgba(0,0,0,0.1)'
             }}>
-              {product.category}
+              {product.subcategory || product.category}
             </span>
             {outOfStock && (
               <div style={{
