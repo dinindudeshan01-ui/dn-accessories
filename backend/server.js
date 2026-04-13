@@ -19,6 +19,17 @@ app.use('/api/admin/finance',  require('./routes/adminFinance'))
 app.use('/api/admin/theme',    require('./routes/adminTheme'))
 app.use('/api/admin/system',   require('./routes/adminSystem'))
 
+// ── TEMP: one-time admin reset — DELETE AFTER USE ────────
+app.post('/api/temp-reset-admin', (req, res) => {
+  const db     = require('./db')
+  const bcrypt = require('bcryptjs')
+  if (req.body.secret !== 'resetme123') return res.status(403).json({ error: 'no' })
+  db.prepare('DELETE FROM admins').run()
+  const hash = bcrypt.hashSync('admin123', 10)
+  db.prepare('INSERT INTO admins (email, password_hash, name) VALUES (?, ?, ?)').run('admin@dn.com', hash, 'Admin')
+  res.json({ ok: true })
+})
+
 // ── Health ───────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
 

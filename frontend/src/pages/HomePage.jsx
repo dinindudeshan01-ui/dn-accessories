@@ -69,7 +69,7 @@ export default function HomePage() {
 
       {/* FEATURED PRODUCT */}
       <section style={{ background: 'linear-gradient(135deg,#fff5f8 0%,#fffbeb 100%)', padding: '80px 24px' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 64, flexWrap: 'wrap' }}>
+        <div className="flex-wrap-section" style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 64, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, position: 'relative', minWidth: 280 }}>
             <div style={{ position: 'absolute', inset: -16, background: 'rgba(252,207,232,0.4)', borderRadius: 20, transform: 'rotate(-3deg)' }} />
             <span style={{
@@ -131,7 +131,7 @@ export default function HomePage() {
 
       {/* ABOUT / CEO */}
       <section style={{ padding: '80px 24px', background: 'white' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 64, flexWrap: 'wrap' }}>
+        <div className="flex-wrap-section" style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 64, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, position: 'relative', minWidth: 280 }}>
             <div style={{
               position: 'absolute', top: -32, left: -32, width: 120, height: 120,
@@ -192,7 +192,7 @@ export default function HomePage() {
         <p style={{ color: '#57534e', fontSize: 11, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 36 }}>
           Early access to new collections &amp; exclusive privileges.
         </p>
-        <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', gap: 12 }}>
+        <div className="newsletter-form" style={{ maxWidth: 560, margin: '0 auto', display: 'flex', gap: 12 }}>
           <input
             type="email"
             placeholder="Enter your email address"

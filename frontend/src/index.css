@@ -23,3 +23,21 @@ button { cursor: pointer; border: none; font-family: var(--sans); }
 @keyframes shimmer { 0%{background-position:0%} 100%{background-position:200%} }
 @keyframes pop { 0%{transform:scale(0)} 70%{transform:scale(1.2)} 100%{transform:scale(1)} }
 @keyframes pulse { 0%,100%{transform:scale(1);opacity:0.7} 50%{transform:scale(1.15);opacity:0.4} }
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  /* Header */
+  .menu-toggle { display: flex !important; }
+  .desktop-nav { display: none !important; }
+
+  /* Collections grid → 2 columns */
+  .collections-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 16px !important; }
+
+  /* Featured product & About → stack */
+  .flex-wrap-section { flex-direction: column !important; gap: 32px !important; }
+
+  /* Newsletter → stack */
+  .newsletter-form { flex-direction: column !important; }
+  .newsletter-form input,
+  .newsletter-form button { width: 100% !important; }
+}
