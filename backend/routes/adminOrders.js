@@ -4,6 +4,9 @@ const db      = require('../db')
 const adminAuth = require('../middleware/adminAuth')
 const { auditLog } = require('../middleware/auditLog')
 
+// Migration — add bank_used column if missing
+try { db.exec('ALTER TABLE orders ADD COLUMN bank_used TEXT') } catch { /* already exists */ }
+
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001'
 
 router.get('/', adminAuth, (req, res) => {
@@ -14,7 +17,7 @@ router.get('/', adminAuth, (req, res) => {
 
   res.json(orders.map(o => ({
     ...o,
-    items: JSON.parse(o.items_json || '[]'),
+    items:    JSON.parse(o.items_json || '[]'),
     slip_url: o.slip_path ? `${BASE_URL}/uploads/slips/${o.slip_path}` : null,
   })))
 })
@@ -35,7 +38,7 @@ router.patch('/:id/status', adminAuth, (req, res) => {
   db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, req.params.id)
   auditLog({
     req, action: 'UPDATE', entity: 'order', entityId: req.params.id,
-    description: `Order #${req.params.id} status: ${old?.status} → ${status}`,
+    description: `Order ${old?.reference || '#' + req.params.id} status: ${old?.status} → ${status}`,
     oldValue: { status: old?.status }, newValue: { status }
   })
   res.json({ success: true })

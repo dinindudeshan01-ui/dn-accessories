@@ -3,7 +3,7 @@ import { useCart } from '../context/CartContext'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 
-// ── BANK DETAILS (Updated from Image) ─────────────────────────────────────────
+// ── BANK DETAILS ──────────────────────────────────────────────────────────────
 const ACCOUNTS = [
   {
     id: 'boc',
@@ -28,7 +28,7 @@ const STEPS = ['Your Details', 'Payment', 'Done']
 export default function CheckoutPage() {
   const { cart, totalPrice, clearCart } = useCart()
   const navigate = useNavigate()
-  const [step, setStep] = useState(0) 
+  const [step, setStep] = useState(0)
   const [order, setOrder] = useState(null)
 
   useEffect(() => {
@@ -36,8 +36,8 @@ export default function CheckoutPage() {
   }, [cart, step, navigate])
 
   useEffect(() => {
-  window.scrollTo(0, 0)
-}, [step])
+    window.scrollTo(0, 0)
+  }, [step])
 
   if (!cart) return null
 
@@ -163,19 +163,21 @@ function PaymentStep({ items, total, onSuccess }) {
     try {
       const kyc = JSON.parse(sessionStorage.getItem('vp_kyc') || '{}')
       const fd = new FormData()
-      fd.append('slip', slip)
-      fd.append('full_name', kyc.full_name)
-      fd.append('nic', kyc.nic)
-      fd.append('phone1', kyc.phone1)
-      fd.append('address', kyc.address)
+      fd.append('slip',       slip)
+      fd.append('full_name',  kyc.full_name  || '')
+      fd.append('nic',        kyc.nic        || '')
+      fd.append('phone1',     kyc.phone1     || '')
+      fd.append('phone2',     kyc.phone2     || '')   // ← was missing
+      fd.append('address',    kyc.address    || '')
+      fd.append('city',       kyc.city       || '')   // ← was missing
       fd.append('items_json', JSON.stringify(items))
-      fd.append('total', total.toString()) // Converting to Rs for backend
-      fd.append('bank_used', selectedBank.bank)
+      fd.append('total',      total.toString())
+      fd.append('bank_used',  selectedBank.bank)
 
       const res = await api.post('/orders', fd)
       onSuccess(res.data)
     } catch (err) {
-      alert('Error submitting order.')
+      alert('Error submitting order. Please try again.')
     } finally { setLoading(false) }
   }
 
@@ -186,7 +188,7 @@ function PaymentStep({ items, total, onSuccess }) {
 
       <div style={{ display: 'flex', gap: 12, marginTop: 24, marginBottom: 16 }}>
         {ACCOUNTS.map(acc => (
-          <button 
+          <button
             key={acc.id}
             onClick={() => setSelectedBank(acc)}
             style={{
@@ -218,14 +220,15 @@ function PaymentStep({ items, total, onSuccess }) {
         </div>
 
         <div style={{ marginTop: 24, padding: 20, background: 'linear-gradient(135deg, #ec4899, #d4a853)', borderRadius: 14, color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>TOTAL TO PAY</span>
-           <span style={{ fontSize: 24, fontWeight: 900 }}>Rs {total.toLocaleString()}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>TOTAL TO PAY</span>
+          <span style={{ fontSize: 24, fontWeight: 900 }}>Rs {total.toLocaleString()}</span>
         </div>
 
         <div onClick={() => fileRef.current.click()} style={{ border: '2px dashed #fce7f3', borderRadius: 16, padding: 30, textAlign: 'center', marginTop: 24, cursor: 'pointer', background: '#fdf9f7' }}>
-           {preview && preview !== 'pdf' && <img src={preview} style={{ maxHeight: 120, borderRadius: 8, marginBottom: 12 }} />}
-           <p style={{ fontSize: 13, fontWeight: 700, color: '#57534e' }}>{slip ? slip.name : 'Click to upload payment receipt'}</p>
-           <input ref={fileRef} type="file" hidden onChange={e => handleFile(e.target.files[0])} />
+          {preview && preview !== 'pdf' && <img src={preview} style={{ maxHeight: 120, borderRadius: 8, marginBottom: 12 }} />}
+          {preview === 'pdf' && <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>}
+          <p style={{ fontSize: 13, fontWeight: 700, color: '#57534e' }}>{slip ? slip.name : 'Click to upload payment receipt'}</p>
+          <input ref={fileRef} type="file" hidden onChange={e => handleFile(e.target.files[0])} />
         </div>
 
         <button onClick={handleSubmit} disabled={loading} style={primaryBtn}>
@@ -236,15 +239,13 @@ function PaymentStep({ items, total, onSuccess }) {
   )
 }
 
-// ── Success Step (With Custom Reference DN-2026-00001) ───────────────────────
+// ── Success Step ──────────────────────────────────────────────────────────────
+// reference comes directly from backend — DN-YYYY-00001
+// No more frontend formatting, both customer and admin see the same ref
 function SuccessStep({ order, onShopMore }) {
   const [show, setShow] = useState(false)
-  
-  // Format the reference: DN-YEAR-ID
-  const year = new Date().getFullYear()
-  const formattedRef = order?.id 
-    ? `DN-${year}-${String(order.id).padStart(5, '0')}` 
-    : order?.reference || `DN-${year}-00001`
+
+  const reference = order?.reference || '—'
 
   useEffect(() => {
     setTimeout(() => { setShow(true); launchConfetti() }, 100)
@@ -257,11 +258,11 @@ function SuccessStep({ order, onShopMore }) {
       <p style={{ margin: '20px 0', color: '#57534e', maxWidth: 400, marginInline: 'auto' }}>
         We are verifying your payment. We will contact you shortly to confirm delivery.
       </p>
-      
+
       <div style={{ background: 'white', padding: 16, borderRadius: 12, border: '1px solid #fce7f3', display: 'inline-block', marginBottom: 24 }}>
         <span style={{ fontSize: 10, color: '#a8a29e', display: 'block', marginBottom: 4 }}>ORDER REFERENCE</span>
         <span style={{ fontSize: 20, fontWeight: 900, color: '#ec4899', letterSpacing: '1px' }}>
-          {formattedRef}
+          {reference}
         </span>
       </div>
 
@@ -303,7 +304,7 @@ function Field({ label, value, onChange, error, required, colSpan, multiline, pl
   return (
     <div style={{ gridColumn: colSpan === 2 ? 'span 2' : 'span 1' }}>
       <label style={{ fontSize: 11, fontWeight: 700, color: '#57534e' }}>{label}{required && '*'}</label>
-      {multiline 
+      {multiline
         ? <textarea rows={3} style={st} value={value} onChange={e => onChange(e.target.value)} />
         : <input style={st} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
       }
@@ -319,10 +320,11 @@ function launchConfetti() {
   const ctx = canvas.getContext('2d')
   canvas.width = window.innerWidth; canvas.height = window.innerHeight
   const particles = Array.from({ length: 80 }, () => ({
-    x: Math.random() * canvas.width, y: -20, s: Math.random() * 4 + 2, c: ['#ec4899', '#ffd700', '#16a34a'][Math.floor(Math.random()*3)]
+    x: Math.random() * canvas.width, y: -20, s: Math.random() * 4 + 2,
+    c: ['#ec4899', '#ffd700', '#16a34a'][Math.floor(Math.random() * 3)]
   }))
   function render() {
-    ctx.clearRect(0,0, canvas.width, canvas.height)
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
     particles.forEach(p => { p.y += p.s; ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 7, 7) })
     if (particles[0].y < canvas.height) requestAnimationFrame(render)
     else canvas.remove()

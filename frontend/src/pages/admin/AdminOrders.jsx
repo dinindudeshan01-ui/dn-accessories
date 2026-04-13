@@ -1,6 +1,6 @@
 // src/pages/admin/AdminOrders.jsx
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard, Card, CardHeader,
@@ -16,12 +16,20 @@ const STATUS_QUICK = [
   { label: 'Cancel',   value: 'cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)'   },
 ]
 
+// Always format reference the same way — uses what backend stored,
+// falls back to DN-YYYY-00001 format if somehow missing
+function formatRef(o) {
+  if (o.reference) return o.reference
+  const year = new Date(o.created_at).getFullYear()
+  return `DN-${year}-${String(o.id).padStart(5, '0')}`
+}
+
 export default function AdminOrders() {
-  const [orders, setOrders]     = useState([])
-  const [stats, setStats]       = useState(null)
-  const [filter, setFilter]     = useState('')
-  const [loading, setLoading]   = useState(true)
-  const [expanded, setExpanded] = useState(null)
+  const [orders,    setOrders]    = useState([])
+  const [stats,     setStats]     = useState(null)
+  const [filter,    setFilter]    = useState('')
+  const [loading,   setLoading]   = useState(true)
+  const [expanded,  setExpanded]  = useState(null)
   const [slipModal, setSlipModal] = useState(null)
 
   useEffect(() => { load() }, [filter])
@@ -43,11 +51,10 @@ export default function AdminOrders() {
     await load()
   }
 
-  const revenue  = stats?.total?.revenue || 0
-  const count    = stats?.total?.count   || 0
-  const avg      = count > 0 ? revenue / count : 0
-  const pending  = stats?.byStatus?.find(s => s.status === 'pending')?.count  || 0
-  const refunds  = stats?.byStatus?.find(s => s.status === 'refunded')?.count || 0
+  const revenue = stats?.total?.revenue || 0
+  const count   = stats?.total?.count   || 0
+  const avg     = count > 0 ? revenue / count : 0
+  const pending = stats?.byStatus?.find(s => s.status === 'pending')?.count  || 0
 
   return (
     <>
@@ -67,9 +74,9 @@ export default function AdminOrders() {
 
       <PageContent>
         <KpiGrid>
-          <KpiCard label="Total Orders"    value={count} />
-          <KpiCard label="Revenue"         value={`Rs ${revenue.toLocaleString()}`} accent />
-          <KpiCard label="Avg Order Value" value={`Rs ${avg.toLocaleString()}`} />
+          <KpiCard label="Total Orders"     value={count} />
+          <KpiCard label="Revenue"          value={`Rs ${revenue.toLocaleString()}`} accent />
+          <KpiCard label="Avg Order Value"  value={`Rs ${Math.round(avg).toLocaleString()}`} />
           <KpiCard label="Pending Approval" value={pending}
             change={pending > 0 ? 'Needs review' : 'All clear'}
             changeUp={pending === 0}
@@ -79,23 +86,24 @@ export default function AdminOrders() {
         <Card>
           <CardHeader title={`${orders.length} orders`} />
           {loading ? <Spinner /> : (
-            <Table headers={['Reference', 'Customer', 'Items', 'Total', 'Status', 'Date', 'Actions']}>
+            <Table headers={['Reference', 'Customer', 'Items', 'Total', 'Bank', 'Status', 'Date', 'Actions']}>
               {orders.map(o => (
-                <>
+                // Fragment needs key here to avoid React warning
+                <React.Fragment key={o.id}>
                   <Tr
-                    key={o.id}
                     onClick={() => setExpanded(expanded === o.id ? null : o.id)}
                     style={{ background: expanded === o.id ? 'rgba(255,45,120,0.04)' : undefined }}
                   >
                     <Td pink style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.5px' }}>
-                      {o.reference || `#${String(o.id).padStart(4, '0')}`}
+                      {formatRef(o)}
                     </Td>
                     <Td>
                       <div style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{o.full_name || '—'}</div>
                       <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{o.phone1 || ''}</div>
                     </Td>
                     <Td muted>{o.items?.length || 0} item{o.items?.length !== 1 ? 's' : ''}</Td>
-                    <Td style={{ fontWeight: 700, color: T.text }}>${o.total.toFixed(2)}</Td>
+                    <Td style={{ fontWeight: 700, color: T.text }}>Rs {Number(o.total).toLocaleString()}</Td>
+                    <Td muted style={{ fontSize: 11 }}>{o.bank_used || '—'}</Td>
                     <Td><StatusPill status={o.status} /></Td>
                     <Td muted style={{ fontSize: 11 }}>{new Date(o.created_at).toLocaleDateString()}</Td>
                     <Td onClick={e => e.stopPropagation()}>
@@ -110,19 +118,20 @@ export default function AdminOrders() {
                   </Tr>
 
                   {expanded === o.id && (
-                    <ExpandedRow key={`${o.id}-exp`} colSpan={7}>
+                    <ExpandedRow colSpan={8}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, paddingTop: 16 }}>
 
-                        {/* KYC Details */}
+                        {/* Customer Details */}
                         <div>
                           <SectionLabel>Customer Details</SectionLabel>
                           <InfoGrid rows={[
                             { label: 'Full Name', value: o.full_name },
                             { label: 'NIC',       value: o.nic },
                             { label: 'Phone 1',   value: o.phone1 },
-                            { label: 'Phone 2',   value: o.phone2 || '—' },
-                            { label: 'City',      value: o.city   || '—' },
+                            { label: 'Phone 2',   value: o.phone2  || '—' },
+                            { label: 'City',      value: o.city    || '—' },
                             { label: 'Address',   value: o.address },
+                            { label: 'Bank Used', value: o.bank_used || '—' },
                           ]} />
                         </div>
 
@@ -134,14 +143,16 @@ export default function AdminOrders() {
                               display: 'flex', justifyContent: 'space-between',
                               padding: '7px 0', borderBottom: `1px solid ${T.border}`, fontSize: 13
                             }}>
-                              <span style={{ color: T.text }}>{item.name} <span style={{ color: T.muted }}>× {item.qty || item.quantity || 1}</span></span>
+                              <span style={{ color: T.text }}>
+                                {item.name} <span style={{ color: T.muted }}>× {item.qty || item.quantity || 1}</span>
+                              </span>
                               <span style={{ color: T.pink, fontWeight: 700 }}>
-                                ${(item.price * (item.qty || item.quantity || 1)).toFixed(2)}
+                                Rs {(item.price * (item.qty || item.quantity || 1)).toLocaleString()}
                               </span>
                             </div>
                           ))}
                           <div style={{ textAlign: 'right', marginTop: 10, fontWeight: 900, color: T.text, fontSize: 14 }}>
-                            Total: ${o.total.toFixed(2)}
+                            Total: Rs {Number(o.total).toLocaleString()}
                           </div>
                         </div>
 
@@ -179,7 +190,7 @@ export default function AdminOrders() {
                                     textAlign: 'center',
                                   }}
                                 >
-                                  View PDF Slip →
+                                  📄 View PDF Slip →
                                 </a>
                               )}
                             </div>
@@ -189,7 +200,6 @@ export default function AdminOrders() {
                             </div>
                           )}
 
-                          {/* Quick action buttons */}
                           <SectionLabel style={{ marginTop: 16 }}>Quick Actions</SectionLabel>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {STATUS_QUICK.filter(q => q.value !== o.status).map(q => (
@@ -215,14 +225,14 @@ export default function AdminOrders() {
                       </div>
                     </ExpandedRow>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </Table>
           )}
         </Card>
       </PageContent>
 
-      {/* Full-screen slip preview modal */}
+      {/* Full-screen image slip preview */}
       {slipModal && (
         <div
           onClick={() => setSlipModal(null)}
@@ -247,7 +257,6 @@ export default function AdminOrders() {
               color: 'white', fontSize: 28, width: 44, height: 44,
               borderRadius: '50%', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'Arial, sans-serif',
             }}
           >
             &times;

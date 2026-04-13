@@ -9,6 +9,9 @@ const fs = require('fs')
 const uploadDir = path.join(__dirname, '../uploads/slips')
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true })
 
+// Migration — add bank_used column if missing
+try { db.exec('ALTER TABLE orders ADD COLUMN bank_used TEXT') } catch { /* already exists */ }
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -19,7 +22,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = /jpeg|jpg|png|pdf|webp/
     const ext = allowed.test(path.extname(file.originalname).toLowerCase())
@@ -29,18 +32,18 @@ const upload = multer({
   }
 })
 
-// GET all orders (admin use)
+// GET all orders
 router.get('/', (req, res) => {
   const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all()
   res.json(orders)
 })
 
-// POST new order with KYC + slip
+// POST new order
 router.post('/', upload.single('slip'), (req, res) => {
   try {
     const {
       full_name, nic, phone1, phone2,
-      address, city, items_json, total
+      address, city, items_json, total, bank_used
     } = req.body
 
     if (!full_name || !nic || !phone1 || !address || !items_json || !total) {
@@ -51,25 +54,34 @@ router.post('/', upload.single('slip'), (req, res) => {
       return res.status(400).json({ error: 'Payment slip is required' })
     }
 
-    // Generate reference number VP-YYYY-XXXXX
-    const year = new Date().getFullYear()
-    const rand = Math.floor(10000 + Math.random() * 90000)
-    const reference = `VP-${year}-${rand}`
-
     const slip_path = req.file.filename
 
-    const stmt = db.prepare(`
+    // Insert first — no reference yet, we need the id
+    const result = db.prepare(`
       INSERT INTO orders
-        (reference, full_name, nic, phone1, phone2, address, city, total, items_json, slip_path, status)
+        (full_name, nic, phone1, phone2, address, city, total, items_json, slip_path, bank_used, status)
       VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-    `)
-
-    const result = stmt.run(
-      reference, full_name, nic, phone1,
-      phone2 || null, address, city || null,
-      parseFloat(total), items_json, slip_path
+    `).run(
+      full_name,
+      nic,
+      phone1,
+      phone2    || null,
+      address,
+      city      || null,
+      parseFloat(total),
+      items_json,
+      slip_path,
+      bank_used || null
     )
+
+    // Generate DN-YYYY-00001 using the real inserted id
+    const year = new Date().getFullYear()
+    const reference = `DN-${year}-${String(result.lastInsertRowid).padStart(5, '0')}`
+
+    // Save reference back
+    db.prepare('UPDATE orders SET reference = ? WHERE id = ?')
+      .run(reference, result.lastInsertRowid)
 
     res.json({
       id: result.lastInsertRowid,
