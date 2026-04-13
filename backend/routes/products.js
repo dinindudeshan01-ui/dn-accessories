@@ -6,8 +6,8 @@ const db = require('../db')
 router.get('/', (req, res) => {
   const { category } = req.query
   const products = category
-    ? db.prepare('SELECT * FROM products WHERE category = ? ORDER BY sort_order ASC, created_at ASC').all(category)
-    : db.prepare('SELECT * FROM products ORDER BY sort_order ASC, created_at ASC').all()
+    ? db.prepare('SELECT * FROM products WHERE category = ? ORDER BY group_order ASC, sort_order ASC, created_at ASC').all(category)
+    : db.prepare('SELECT * FROM products ORDER BY group_order ASC, sort_order ASC, created_at ASC').all()
   res.json(products)
 })
 
