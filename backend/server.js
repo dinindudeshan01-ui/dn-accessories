@@ -4,7 +4,7 @@ const cors    = require('cors')
 const path    = require('path')
 const app     = express()
 
-app.use(cors({ origin: 'https://dnaccessories02of.netlify.app' }))
+app.use(cors({ origin: 'https://dnaccessories.netlify.app' }))
 app.use(express.json())
 
 // Serve uploaded slips statically (admin can view them)
