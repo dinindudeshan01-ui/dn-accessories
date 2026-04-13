@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const adminApi = axios.create({ baseURL: '/api/admin' })
+const adminApi = axios.create({ baseURL: `${import.meta.env.VITE_API_URL}/api/admin` })
 
 adminApi.interceptors.request.use(config => {
   const token = localStorage.getItem('dn-admin-token')
