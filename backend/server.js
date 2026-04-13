@@ -30,6 +30,12 @@ app.post('/api/temp-reset-admin', (req, res) => {
   res.json({ ok: true })
 })
 
+app.get('/api/temp-check-admin', (req, res) => {
+  const db = require('./db')
+  const admins = db.prepare('SELECT id, email, name FROM admins').all()
+  res.json(admins)
+})
+
 // ── Health ───────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }))
 
