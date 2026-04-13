@@ -2,38 +2,44 @@ import { useState, useEffect } from 'react'
 import api from '../lib/api'
 import { useCart } from '../context/CartContext'
 
-const CATEGORIES = [
-  { value: '',          label: 'All'       },
-  { value: 'charmed',   label: 'Charms & pendents'   },
-  { value: 'plain',     label: 'Plain'     },
-  { value: 'signature', label: 'Signature' },
-  { value: 'bangle',    label: 'Bangles'   },
-  { value: 'supplies',  label: 'Supplies'  },
-]
+// ── Group products by name patterns ──────────────────────
+function groupProducts(products) {
+  const groups = [
+    { key: 'butterfly', label: 'Butterfly Charms',     match: p => /butterfly/i.test(p.name) },
+    { key: 'shell',     label: 'Shell Charms',         match: p => /shell/i.test(p.name) },
+    { key: 'daisy',     label: 'Daisy & Flower Charms',match: p => /daisy|flower/i.test(p.name) },
+    { key: 'premium',   label: 'Premium Charms',       match: p => p.price >= 100 },
+    { key: 'other',     label: 'More Charms',          match: () => true },
+  ]
+
+  const assigned = new Set()
+  return groups.map(g => {
+    const items = products.filter(p => !assigned.has(p.id) && g.match(p))
+    items.forEach(p => assigned.add(p.id))
+    return { ...g, items }
+  }).filter(g => g.items.length > 0)
+}
 
 export default function CatalogPage() {
   const [products, setProducts] = useState([])
   const [loading, setLoading]   = useState(true)
-  const [category, setCategory] = useState('')
   const [added, setAdded]       = useState({})
   const [selected, setSelected] = useState(null)
   const { addItem } = useCart()
 
   useEffect(() => {
     setLoading(true)
-    api.get('/products', { params: category ? { category } : {} })
+    api.get('/products')
       .then(res => setProducts(res.data))
       .catch(err => console.error(err))
       .finally(() => setLoading(false))
-  }, [category])
+  }, [])
 
-  // Lock body scroll when modal open
   useEffect(() => {
     document.body.style.overflow = selected ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [selected])
 
-  // Close on Escape
   useEffect(() => {
     const handler = e => { if (e.key === 'Escape') setSelected(null) }
     window.addEventListener('keydown', handler)
@@ -47,44 +53,18 @@ export default function CatalogPage() {
     setTimeout(() => setAdded(prev => ({ ...prev, [product.id]: false })), 1500)
   }
 
-  function handleModalAdd(product) {
-    if (product.stock === 0) return
-    addItem(product)
-    setAdded(prev => ({ ...prev, [product.id]: true }))
-    setTimeout(() => setAdded(prev => ({ ...prev, [product.id]: false })), 1500)
-  }
+  const groups = groupProducts(products)
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '60px 24px' }}>
 
       {/* Page header */}
-      <div style={{ textAlign: 'center', marginBottom: 48 }}>
+      <div style={{ textAlign: 'center', marginBottom: 64 }}>
         <h1 style={{ fontFamily: 'var(--serif)', fontSize: 40, fontWeight: 900, fontStyle: 'italic', marginBottom: 12 }}>
           Our Collection
         </h1>
-        <div style={{ height: 3, width: 64, background: 'linear-gradient(90deg,#ec4899,#d4a853)', borderRadius: 2, margin: '0 auto' }} />
-      </div>
-
-      {/* Category filters */}
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48 }}>
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat.value}
-            onClick={() => setCategory(cat.value)}
-            style={{
-              padding: '8px 20px',
-              fontSize: 11, fontWeight: 900,
-              letterSpacing: '1.5px', textTransform: 'uppercase',
-              border: '2px solid',
-              borderColor: category === cat.value ? '#ec4899' : '#e7e5e4',
-              background: category === cat.value ? '#ec4899' : 'white',
-              color: category === cat.value ? 'white' : '#57534e',
-              borderRadius: 999, cursor: 'pointer', transition: 'all 0.2s'
-            }}
-          >
-            {cat.label}
-          </button>
-        ))}
+        <div style={{ height: 3, width: 64, background: 'linear-gradient(90deg,#ec4899,#d4a853)', borderRadius: 2, margin: '0 auto 16px' }} />
+        <p style={{ fontSize: 14, color: '#78716c' }}>{products.length} handcrafted pieces</p>
       </div>
 
       {loading && (
@@ -93,32 +73,46 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {!loading && products.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: '#a8a29e', fontSize: 14 }}>
-          No products found in this category.
-        </div>
-      )}
+      {!loading && groups.map((group, gi) => (
+        <div key={group.key} style={{ marginBottom: 72 }}>
 
-      {!loading && products.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 32 }}>
-          {products.map(product => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              added={added[product.id]}
-              onAdd={() => handleAdd(product)}
-              onView={() => setSelected(product)}
-            />
-          ))}
-        </div>
-      )}
+          {/* Section header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32 }}>
+            <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg,#fce7f3,transparent)' }} />
+            <div style={{ textAlign: 'center' }}>
+              <h2 style={{
+                fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 900,
+                fontStyle: 'italic', color: '#1c1917', marginBottom: 4
+              }}>
+                {group.label}
+              </h2>
+              <p style={{ fontSize: 11, color: '#a8a29e', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase' }}>
+                {group.items.length} {group.items.length === 1 ? 'piece' : 'pieces'}
+              </p>
+            </div>
+            <div style={{ flex: 1, height: 1, background: 'linear-gradient(270deg,#fce7f3,transparent)' }} />
+          </div>
 
-      {/* Product Detail Modal */}
+          {/* Product grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 28 }}>
+            {group.items.map(product => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                added={added[product.id]}
+                onAdd={() => handleAdd(product)}
+                onView={() => setSelected(product)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
       {selected && (
         <ProductModal
           product={selected}
           added={added[selected.id]}
-          onAdd={() => handleModalAdd(selected)}
+          onAdd={() => handleAdd(selected)}
           onClose={() => setSelected(null)}
         />
       )}
@@ -145,7 +139,6 @@ function ProductCard({ product, added, onAdd, onView }) {
         display: 'flex', flexDirection: 'column'
       }}
     >
-      {/* Image */}
       <div style={{ aspectRatio: '4/5', overflow: 'hidden', position: 'relative' }}>
         <img
           src={product.image_url}
@@ -156,13 +149,11 @@ function ProductCard({ product, added, onAdd, onView }) {
             transition: 'transform 0.7s ease'
           }}
         />
-        {/* Hover overlay hint */}
         {!outOfStock && hovered && (
           <div style={{
             position: 'absolute', inset: 0,
             background: 'rgba(236,72,153,0.12)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'opacity 0.2s'
           }}>
             <span style={{
               background: 'white', color: '#ec4899',
@@ -194,11 +185,7 @@ function ProductCard({ product, added, onAdd, onView }) {
         )}
       </div>
 
-      {/* Info */}
       <div style={{ padding: '20px 20px 24px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-        <p style={{ fontSize: 10, fontWeight: 900, letterSpacing: '2px', textTransform: 'uppercase', color: '#a8a29e', marginBottom: 6 }}>
-          {product.category}
-        </p>
         <h4 style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 700, marginBottom: 8, lineHeight: 1.3 }}>
           {product.name}
         </h4>
@@ -237,7 +224,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
 
   return (
     <>
-      {/* Backdrop */}
       <div
         onClick={onClose}
         style={{
@@ -247,8 +233,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
           animation: 'fadeIn 0.2s ease'
         }}
       />
-
-      {/* Modal */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 1001,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -263,8 +247,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
           boxShadow: '0 32px 80px rgba(0,0,0,0.25)',
           animation: 'modalIn 0.3s cubic-bezier(0.34,1.56,0.64,1)'
         }}>
-
-          {/* Left — Image */}
           <div style={{ flex: '0 0 42%', position: 'relative', background: '#fdf2f8', overflow: 'hidden' }}>
             <img
               src={product.image_url}
@@ -275,7 +257,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
                 opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.4s'
               }}
             />
-            {/* Category badge */}
             <span style={{
               position: 'absolute', top: 16, left: 16,
               background: 'white', color: '#ec4899',
@@ -299,10 +280,7 @@ function ProductModal({ product, added, onAdd, onClose }) {
             )}
           </div>
 
-          {/* Right — Details */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-
-            {/* Close button */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '18px 20px 0' }}>
               <button
                 onClick={onClose}
@@ -318,33 +296,22 @@ function ProductModal({ product, added, onAdd, onClose }) {
               >×</button>
             </div>
 
-            {/* Content */}
             <div style={{ padding: '12px 32px 32px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-
               <h2 style={{
                 fontFamily: 'var(--serif)', fontSize: 28, fontWeight: 900,
                 lineHeight: 1.2, marginBottom: 16, color: '#1c1917'
               }}>
                 {product.name}
               </h2>
-
-              {/* Price row */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
                 <span style={{ fontSize: 30, fontWeight: 900, color: '#ec4899' }}>
                   Rs {Number(product.price).toFixed(2)}
                 </span>
-                <span style={{ fontSize: 12, color: '#a8a29e', fontWeight: 600 }}>Rs </span>
               </div>
-
-              {/* Divider */}
               <div style={{ height: 1, background: 'linear-gradient(90deg,#fce7f3,transparent)', marginBottom: 20 }} />
-
-              {/* Description */}
               <p style={{ fontSize: 14, color: '#57534e', lineHeight: 1.8, marginBottom: 24 }}>
                 {product.description || 'A beautifully handcrafted piece from the D&N collection.'}
               </p>
-
-              {/* Stock info */}
               <div style={{ marginBottom: 28 }}>
                 {outOfStock ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -363,8 +330,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
                   </div>
                 )}
               </div>
-
-              {/* Perks */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 28 }}>
                 {[
                   '✦  Handcrafted with premium materials',
@@ -374,8 +339,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
                   <div key={i} style={{ fontSize: 12, color: '#78716c', fontWeight: 500 }}>{perk}</div>
                 ))}
               </div>
-
-              {/* CTA */}
               <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <button
                   onClick={onAdd}
@@ -394,7 +357,6 @@ function ProductModal({ product, added, onAdd, onClose }) {
                 >
                   {outOfStock ? 'Currently Out of Stock' : added ? '✓ Added to Cart!' : 'Add to Cart'}
                 </button>
-
                 <button
                   onClick={onClose}
                   style={{
@@ -411,19 +373,13 @@ function ProductModal({ product, added, onAdd, onClose }) {
                   Continue Shopping
                 </button>
               </div>
-
             </div>
           </div>
-
         </div>
       </div>
 
-      {/* Animations */}
       <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0 }
-          to   { opacity: 1 }
-        }
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes modalIn {
           from { opacity: 0; transform: scale(0.92) translateY(16px) }
           to   { opacity: 1; transform: scale(1)    translateY(0)    }
