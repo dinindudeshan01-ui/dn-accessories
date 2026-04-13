@@ -2,29 +2,34 @@ import { useState, useEffect } from 'react'
 import api from '../lib/api'
 import { useCart } from '../context/CartContext'
 
-// ── Group products by subcategory from DB ──────────────────
+// ── Group products by subcategory, preserving backend sort order ───────────────
+// Products arrive already sorted by sort_order from the backend.
+// We maintain that order within each group and across groups
+// (group order = first appearance of that subcategory in the sorted list).
 function groupProducts(products) {
-  const groups = {}
-  const noGroup = []
+  const groupOrder = []   // tracks insertion order of group keys
+  const groups     = {}
 
   products.forEach(p => {
-    if (p.subcategory && p.subcategory.trim() !== '') {
-      if (!groups[p.subcategory]) groups[p.subcategory] = []
-      groups[p.subcategory].push(p)
-    } else {
-      noGroup.push(p)
+    const key = (p.subcategory && p.subcategory.trim() !== '') ? p.subcategory.trim() : '__other__'
+    if (!groups[key]) {
+      groups[key] = []
+      groupOrder.push(key)
     }
+    groups[key].push(p)
   })
 
-  const result = Object.entries(groups).map(([label, items]) => ({ key: label, label, items }))
-  if (noGroup.length > 0) result.push({ key: 'other', label: 'Other', items: noGroup })
-  return result
+  return groupOrder.map(key => ({
+    key,
+    label: key === '__other__' ? 'Other' : key,
+    items: groups[key],
+  }))
 }
 
 export default function CatalogPage() {
   const [products, setProducts] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [added, setAdded]       = useState({})
+  const [loading,  setLoading]  = useState(true)
+  const [added,    setAdded]    = useState({})
   const [selected, setSelected] = useState(null)
   const { addItem } = useCart()
 

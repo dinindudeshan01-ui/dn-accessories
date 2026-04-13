@@ -7,16 +7,22 @@ import {
   Modal, ModalFooter, ImgThumb, CatPill, tokens as T
 } from '../../components/admin/AdminUI'
 
-const CATS = ['Charms & pendents', 'plain', 'signature', 'bangle', 'supplies']
+const CATS    = ['Charms & pendents', 'plain', 'signature', 'bangle', 'supplies']
 const SUBCATS = ['Butterfly Charms', 'Shell Charms', 'Daisy Charms', 'Flower Charms', 'Heart Charms', 'Premium Charms', 'Star & Sea Charms', 'Other Charms']
 
+// ── View toggle: 'table' | 'grid' ────────────────────────────────────────────
 export default function AdminProducts() {
-  const [products, setProducts] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [modal, setModal]       = useState(null)
-  const [saving, setSaving]     = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [form, setForm]         = useState({ name:'', price:'', description:'', image_url:'', category:'Charms & pendents', subcategory:'', stock:'' })
+  const [products,   setProducts]   = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [modal,      setModal]      = useState(null)
+  const [saving,     setSaving]     = useState(false)
+  const [uploading,  setUploading]  = useState(false)
+  const [view,       setView]       = useState('grid')   // 'table' | 'grid'
+  const [reordering, setReordering] = useState(false)
+  const [form, setForm] = useState({
+    name:'', price:'', description:'', image_url:'',
+    category:'Charms & pendents', subcategory:'', stock:''
+  })
   const fileInputRef = useRef(null)
 
   useEffect(() => { load() }, [])
@@ -46,9 +52,7 @@ export default function AdminProducts() {
       setForm(f => ({ ...f, image_url: url }))
     } catch (err) {
       alert('Image upload failed: ' + err.message)
-    } finally {
-      setUploading(false)
-    }
+    } finally { setUploading(false) }
   }
 
   async function save() {
@@ -67,13 +71,39 @@ export default function AdminProducts() {
     await adminApi.delete(`/products/${id}`); await load()
   }
 
+  // ── Save new order to backend ─────────────────────────────────────────────
+  async function saveOrder(reordered) {
+    setReordering(true)
+    try {
+      const order = reordered.map((p, i) => ({ id: p.id, sort_order: i + 1 }))
+      await adminApi.patch('/products/reorder', { order })
+      setProducts(reordered)
+    } catch (e) {
+      alert('Failed to save order: ' + e.message)
+    } finally { setReordering(false) }
+  }
+
   const stockStatus = s => s === 0 ? 'critical' : s <= 5 ? 'low' : 'ok'
 
   return (
     <>
-      <PageHeader title="Products" subtitle={`${products.length} items`} action={<Btn onClick={openAdd}>+ Add Product</Btn>} />
+      <PageHeader
+        title="Products"
+        subtitle={`${products.length} items`}
+        action={
+          <div style={{ display:'flex', gap:8 }}>
+            {/* View toggle */}
+            <div style={{ display:'flex', borderRadius:10, overflow:'hidden', border:`1px solid ${T.border}` }}>
+              <ViewToggleBtn active={view==='table'} onClick={() => setView('table')} label="≡ Table" />
+              <ViewToggleBtn active={view==='grid'}  onClick={() => setView('grid')}  label="⠿ Drag" />
+            </div>
+            <Btn onClick={openAdd}>+ Add Product</Btn>
+          </div>
+        }
+      />
       <PageContent>
-        {loading ? <Spinner /> : (
+        {loading ? <Spinner /> : view === 'table' ? (
+          // ── TABLE VIEW ──────────────────────────────────────────────────────
           <Card>
             <Table headers={['', 'Name', 'Category', 'Subcategory', 'Price', 'Stock', 'Status', 'Actions']}>
               {products.length === 0
@@ -100,6 +130,24 @@ export default function AdminProducts() {
                 ))}
             </Table>
           </Card>
+        ) : (
+          // ── DRAG GRID VIEW ──────────────────────────────────────────────────
+          <>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, padding:'10px 14px', background:T.surface, borderRadius:12, border:`1px solid ${T.border}` }}>
+              <span style={{ fontSize:18 }}>↕</span>
+              <span style={{ fontSize:12, color:T.muted }}>
+                Drag cards to reorder. Order is saved automatically when you drop.
+              </span>
+              {reordering && <span style={{ fontSize:11, color:T.gold, marginLeft:'auto' }}>Saving…</span>}
+            </div>
+            <DragGrid
+              products={products}
+              onReorder={saveOrder}
+              onEdit={openEdit}
+              onDelete={deleteProduct}
+              stockStatus={stockStatus}
+            />
+          </>
         )}
       </PageContent>
 
@@ -148,5 +196,205 @@ export default function AdminProducts() {
         </Modal>
       )}
     </>
+  )
+}
+
+// ── View Toggle Button ────────────────────────────────────────────────────────
+function ViewToggleBtn({ active, onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding:'6px 14px', fontSize:11, fontWeight:700, border:'none', cursor:'pointer',
+        background: active ? T.pink : 'transparent',
+        color: active ? 'white' : T.muted,
+        transition:'all 0.2s',
+      }}
+    >{label}</button>
+  )
+}
+
+// ── Drag Grid ─────────────────────────────────────────────────────────────────
+function DragGrid({ products, onReorder, onEdit, onDelete, stockStatus }) {
+  const [items,    setItems]    = useState(products)
+  const [dragIdx,  setDragIdx]  = useState(null)  // index being dragged
+  const [overIdx,  setOverIdx]  = useState(null)  // index being hovered
+
+  // Keep in sync if parent reloads
+  useEffect(() => { setItems(products) }, [products])
+
+  function handleDragStart(e, idx) {
+    setDragIdx(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    // ghost image: transparent (we paint our own highlight)
+    const ghost = document.createElement('div')
+    ghost.style.position = 'absolute'; ghost.style.top = '-9999px'
+    document.body.appendChild(ghost)
+    e.dataTransfer.setDragImage(ghost, 0, 0)
+    setTimeout(() => document.body.removeChild(ghost), 0)
+  }
+
+  function handleDragOver(e, idx) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (idx !== overIdx) setOverIdx(idx)
+  }
+
+  function handleDrop(e, idx) {
+    e.preventDefault()
+    if (dragIdx === null || dragIdx === idx) { reset(); return }
+    const next = [...items]
+    const [moved] = next.splice(dragIdx, 1)
+    next.splice(idx, 0, moved)
+    setItems(next)
+    onReorder(next)
+    reset()
+  }
+
+  function handleDragEnd() { reset() }
+
+  function reset() { setDragIdx(null); setOverIdx(null) }
+
+  if (items.length === 0) return <Empty message="No products yet — add your first one" />
+
+  return (
+    <div style={{
+      display:'grid',
+      gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))',
+      gap:14,
+    }}>
+      {items.map((p, idx) => (
+        <DragCard
+          key={p.id}
+          product={p}
+          idx={idx}
+          isDragging={dragIdx === idx}
+          isOver={overIdx === idx && dragIdx !== idx}
+          stockStatus={stockStatus}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onDragEnd={handleDragEnd}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── Individual Draggable Card ─────────────────────────────────────────────────
+function DragCard({ product: p, idx, isDragging, isOver, stockStatus, onEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd }) {
+  const T_local = {
+    bg:     '#13131f',
+    border: 'rgba(255,255,255,0.07)',
+    borderHi:'rgba(255,45,120,0.5)',
+    text:   '#f0f0f8',
+    muted:  '#6b6b85',
+    pink:   '#ff2d78',
+    gold:   '#ffc53d',
+  }
+
+  const borderColor = isOver ? T_local.borderHi : isDragging ? 'rgba(255,197,61,0.4)' : T_local.border
+
+  return (
+    <div
+      draggable
+      onDragStart={e => onDragStart(e, idx)}
+      onDragOver={e => onDragOver(e, idx)}
+      onDrop={e => onDrop(e, idx)}
+      onDragEnd={onDragEnd}
+      style={{
+        background: T_local.bg,
+        border: `2px solid ${borderColor}`,
+        borderRadius: 14,
+        overflow: 'hidden',
+        opacity: isDragging ? 0.45 : 1,
+        transform: isOver ? 'scale(1.03)' : 'scale(1)',
+        transition: 'border-color 0.15s, transform 0.15s, opacity 0.15s',
+        cursor: 'grab',
+        userSelect: 'none',
+        boxShadow: isOver ? `0 0 20px rgba(255,45,120,0.2)` : 'none',
+        position: 'relative',
+      }}
+    >
+      {/* Drag handle indicator */}
+      <div style={{
+        position:'absolute', top:8, right:8, zIndex:2,
+        fontSize:12, color: T_local.muted, lineHeight:1,
+        letterSpacing:1,
+      }}>⠿</div>
+
+      {/* Order badge */}
+      <div style={{
+        position:'absolute', top:8, left:8, zIndex:2,
+        background:'rgba(0,0,0,0.55)', borderRadius:6,
+        fontSize:9, fontWeight:900, color: T_local.muted,
+        padding:'2px 7px', letterSpacing:'0.5px',
+      }}>#{idx + 1}</div>
+
+      {/* Image */}
+      <div style={{ aspectRatio:'4/3', overflow:'hidden', background:'#0a0a14' }}>
+        {p.image_url
+          ? <img src={p.image_url} alt={p.name} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', pointerEvents:'none' }} />
+          : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', color: T_local.muted, fontSize:28 }}>📦</div>
+        }
+      </div>
+
+      {/* Info */}
+      <div style={{ padding:'12px 12px 10px' }}>
+        <div style={{ fontWeight:700, fontSize:13, color: T_local.text, marginBottom:3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name}</div>
+        <div style={{ fontSize:11, color: T_local.muted, marginBottom:8, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+          {p.subcategory || p.category || '—'}
+        </div>
+
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+          <span style={{ fontSize:14, fontWeight:900, color: T_local.pink }}>Rs {Number(p.price).toFixed(2)}</span>
+          <StockBadge status={stockStatus(p.stock)} stock={p.stock} />
+        </div>
+
+        {/* Actions */}
+        <div style={{ display:'flex', gap:6 }}
+          onMouseDown={e => e.stopPropagation()} // prevent drag starting from buttons
+        >
+          <ActionBtn onClick={() => onEdit(p)}>Edit</ActionBtn>
+          <ActionBtn danger onClick={() => onDelete(p.id)}>Del</ActionBtn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StockBadge({ status, stock }) {
+  const cfg = {
+    ok:       { bg:'rgba(22,163,74,0.15)',  color:'#4ade80', label: `${stock} in stock` },
+    low:      { bg:'rgba(255,197,61,0.15)', color:'#ffc53d', label: `${stock} left` },
+    critical: { bg:'rgba(255,45,120,0.15)', color:'#ff2d78', label: 'Out of stock' },
+  }[status] || { bg:'transparent', color:'#6b6b85', label: '—' }
+
+  return (
+    <span style={{ fontSize:9, fontWeight:900, letterSpacing:'0.5px', textTransform:'uppercase', padding:'3px 8px', borderRadius:6, background:cfg.bg, color:cfg.color }}>
+      {cfg.label}
+    </span>
+  )
+}
+
+function ActionBtn({ children, onClick, danger }) {
+  const [hov, setHov] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        flex:1, padding:'5px 0', fontSize:10, fontWeight:800,
+        letterSpacing:'0.5px', textTransform:'uppercase', border:'none',
+        borderRadius:7, cursor:'pointer', transition:'all 0.15s',
+        background: danger
+          ? (hov ? '#ff2d78' : 'rgba(255,45,120,0.12)')
+          : (hov ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
+        color: danger ? (hov ? 'white' : '#ff2d78') : '#f0f0f8',
+      }}
+    >{children}</button>
   )
 }
