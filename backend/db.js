@@ -11,6 +11,7 @@ db.exec(`
     description TEXT,
     image_url TEXT,
     category TEXT,
+    subcategory TEXT DEFAULT '',
     stock INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -88,12 +89,12 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS admins (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  name TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 
   CREATE TABLE IF NOT EXISTS archive_products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +144,7 @@ db.exec(`
 
 const migrations = [
   'ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0',
+  'ALTER TABLE products ADD COLUMN subcategory TEXT DEFAULT ""',
 ]
 migrations.forEach(sql => {
   try { db.exec(sql) } catch { /* already exists */ }

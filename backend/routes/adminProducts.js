@@ -10,23 +10,23 @@ router.get('/', adminAuth, (req, res) => {
 })
 
 router.post('/', adminAuth, (req, res) => {
-  const { name, price, description, image_url, category, stock } = req.body
+  const { name, price, description, image_url, category, subcategory, stock } = req.body
   if (!name || !price) return res.status(400).json({ error: 'Name and price required' })
   const result = db.prepare(
-    'INSERT INTO products (name, price, description, image_url, category, stock) VALUES (?,?,?,?,?,?)'
-  ).run(name, parseFloat(price), description || '', image_url || '', category || '', parseInt(stock) || 0)
+    'INSERT INTO products (name, price, description, image_url, category, subcategory, stock) VALUES (?,?,?,?,?,?,?)'
+  ).run(name, parseFloat(price), description || '', image_url || '', category || '', subcategory || '', parseInt(stock) || 0)
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid)
   auditLog({ req, action: 'CREATE', entity: 'product', entityId: product.id, description: `Created product "${name}"`, newValue: product })
   res.json(product)
 })
 
 router.put('/:id', adminAuth, (req, res) => {
-  const { name, price, description, image_url, category, stock } = req.body
+  const { name, price, description, image_url, category, subcategory, stock } = req.body
   const old = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
   db.prepare(
-    'UPDATE products SET name=?, price=?, description=?, image_url=?, category=?, stock=? WHERE id=?'
-  ).run(name, parseFloat(price), description, image_url, category, parseInt(stock), req.params.id)
+    'UPDATE products SET name=?, price=?, description=?, image_url=?, category=?, subcategory=?, stock=? WHERE id=?'
+  ).run(name, parseFloat(price), description, image_url, category, subcategory || '', parseInt(stock), req.params.id)
   const updated = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
   auditLog({ req, action: 'UPDATE', entity: 'product', entityId: req.params.id, description: `Updated product "${name}"`, oldValue: old, newValue: updated })
   res.json(updated)
@@ -35,7 +35,6 @@ router.put('/:id', adminAuth, (req, res) => {
 router.delete('/:id', adminAuth, (req, res) => {
   const old = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
-  // Archive before delete
   db.prepare('INSERT INTO archive_products (original_id, data_json, deleted_by_email) VALUES (?,?,?)')
     .run(old.id, JSON.stringify(old), req.admin.email)
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id)
