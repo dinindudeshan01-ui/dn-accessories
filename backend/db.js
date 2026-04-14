@@ -320,5 +320,32 @@ const migrations = [
 migrations.forEach(sql => {
   try { db.exec(sql) } catch { /* already exists — safe to ignore */ }
 })
+// ─────────────────────────────────────────────────────────────
+//  ADD THIS BLOCK to backend/db.js
+//  Place it BEFORE the final: module.exports = db
+// ─────────────────────────────────────────────────────────────
+
+// order_cogs — auto-generated COGS entries per sale (accrual basis)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS order_cogs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id      INTEGER NOT NULL,
+    product_id    INTEGER,
+    product_name  TEXT,
+    qty_sold      REAL    NOT NULL,
+    material_id   INTEGER,
+    material_name TEXT,
+    unit          TEXT,
+    qty_used      REAL    NOT NULL,
+    unit_cost     REAL    NOT NULL,
+    line_cost     REAL    NOT NULL,
+    date          TEXT    DEFAULT (date('now')),
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+  );
+`)
+
+// cogs_logged flag on orders — prevents double-logging
+try { db.exec('ALTER TABLE orders ADD COLUMN cogs_logged INTEGER DEFAULT 0') } catch {}
 
 module.exports = db
