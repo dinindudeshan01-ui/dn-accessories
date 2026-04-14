@@ -38,46 +38,47 @@ router.delete('/expenses/:id', adminAuth, (req, res) => {
 // ── P&L ───────────────────────────────────────────────────
 
 router.get('/pl', adminAuth, (req, res) => {
-  const { month } = req.query
+  try {
+    const { month } = req.query
 
-  // Revenue — PAID orders only
-  const revFilter = month
-    ? `WHERE status = 'paid' AND strftime('%Y-%m', created_at) = '${month}'`
-    : `WHERE status = 'paid'`
+    const revFilter = month
+      ? `WHERE status = 'paid' AND strftime('%Y-%m', created_at) = '${month}'`
+      : `WHERE status = 'paid'`
 
-  // COGS — from purchase_bills (paid + partial)
-  const cogFilter = month
-    ? `WHERE status IN ('paid','partial') AND strftime('%Y-%m', bill_date) = '${month}'`
-    : `WHERE status IN ('paid','partial')`
+    const cogFilter = month
+      ? `WHERE status IN ('paid','partial') AND strftime('%Y-%m', bill_date) = '${month}'`
+      : `WHERE status IN ('paid','partial')`
 
-  // Expenses
-  const expFilter = month
-  ? `WHERE strftime('%Y-%m', date) = '${month}'`
-  : 'WHERE 1=1'
+    const expFilter = month
+      ? `WHERE strftime('%Y-%m', date) = '${month}'`
+      : 'WHERE 1=1'
 
-  const revenue       = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
-  const cogs          = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM purchase_bills ${cogFilter}`).get().total
-  const expenseRows   = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter} GROUP BY category`).all()
-  const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
+    const revenue       = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
+    const cogs          = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM purchase_bills ${cogFilter}`).get().total
+    const expenseRows   = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter} GROUP BY category`).all()
+    const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
 
-  // Bill breakdown for drill-down
-  const billBreakdown = db.prepare(`
-    SELECT b.id, b.bill_number, b.bill_date, b.total, s.name as supplier_name
-    FROM purchase_bills b
-    LEFT JOIN suppliers s ON b.supplier_id = s.id
-    ${cogFilter}
-    ORDER BY b.bill_date DESC
-  `).all()
+    const billBreakdown = db.prepare(`
+      SELECT b.id, b.bill_number, b.bill_date, b.total, s.name as supplier_name
+      FROM purchase_bills b
+      LEFT JOIN suppliers s ON b.supplier_id = s.id
+      ${cogFilter}
+      ORDER BY b.bill_date DESC
+    `).all()
 
-  res.json({
-    revenue,
-    cogs,
-    expenses: expenseRows,
-    totalExpenses,
-    grossProfit: revenue - cogs,
-    netProfit: revenue - cogs - totalExpenses,
-    billBreakdown,
-  })
+    res.json({
+      revenue,
+      cogs,
+      expenses: expenseRows,
+      totalExpenses,
+      grossProfit: revenue - cogs,
+      netProfit: revenue - cogs - totalExpenses,
+      billBreakdown,
+    })
+  } catch (e) {
+    console.error('PL ERROR:', e.message)
+    res.status(500).json({ error: e.message })
+  }
 })
 
 // ── SUPPLIERS ─────────────────────────────────────────────
