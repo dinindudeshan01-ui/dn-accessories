@@ -21,7 +21,7 @@ router.post('/expenses', adminAuth, (req, res) => {
     'INSERT INTO expenses (description, category, amount, date) VALUES (?,?,?,?)'
   ).run(description, category || 'Other', parseFloat(amount), date || new Date().toISOString().split('T')[0])
   const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid)
-  auditLog({ req, action: 'CREATE', entity: 'expense', entityId: expense.id, description: `Added expense "${description}" $${amount}`, newValue: expense })
+  auditLog({ req, action: 'CREATE', entity: 'expense', entityId: expense.id, description: `Added expense "${description}" ${amount}`, newValue: expense })
   res.json(expense)
 })
 
@@ -31,7 +31,7 @@ router.delete('/expenses/:id', adminAuth, (req, res) => {
   db.prepare('INSERT INTO archive_expenses (original_id, data_json, deleted_by_email) VALUES (?,?,?)')
     .run(old.id, JSON.stringify(old), req.admin.email)
   db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id)
-  auditLog({ req, action: 'DELETE', entity: 'expense', entityId: req.params.id, description: `Deleted expense "${old.description}" $${old.amount}`, oldValue: old })
+  auditLog({ req, action: 'DELETE', entity: 'expense', entityId: req.params.id, description: `Deleted expense "${old.description}" ${old.amount}`, oldValue: old })
   res.json({ success: true })
 })
 
@@ -39,16 +39,45 @@ router.delete('/expenses/:id', adminAuth, (req, res) => {
 
 router.get('/pl', adminAuth, (req, res) => {
   const { month } = req.query
-  const filter    = month ? `WHERE strftime('%Y-%m', created_at) = '${month}'` : ''
-  const expFilter = month ? `WHERE strftime('%Y-%m', date) = '${month}'` : ''
-  const cogFilter = month ? `WHERE strftime('%Y-%m', date) = '${month}'` : ''
 
-  const revenue     = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${filter}`).get().total
-  const expenseRows = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter} GROUP BY category`).all()
+  // Revenue — PAID orders only
+  const revFilter = month
+    ? `WHERE status = 'paid' AND strftime('%Y-%m', created_at) = '${month}'`
+    : `WHERE status = 'paid'`
+
+  // COGS — from purchase_bills (paid + partial)
+  const cogFilter = month
+    ? `WHERE status IN ('paid','partial') AND strftime('%Y-%m', bill_date) = '${month}'`
+    : `WHERE status IN ('paid','partial')`
+
+  // Expenses
+  const expFilter = month
+    ? `WHERE strftime('%Y-%m', date) = '${month}'`
+    : ''
+
+  const revenue       = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
+  const cogs          = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM purchase_bills ${cogFilter}`).get().total
+  const expenseRows   = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter ? expFilter : 'WHERE 1=1'} GROUP BY category`).all()
   const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
-  const cogs        = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM cogs_entries ${cogFilter}`).get().total
 
-  res.json({ revenue, cogs, expenses: expenseRows, totalExpenses, grossProfit: revenue - cogs, netProfit: revenue - cogs - totalExpenses })
+  // Bill breakdown for drill-down
+  const billBreakdown = db.prepare(`
+    SELECT b.id, b.bill_number, b.bill_date, b.total, s.name as supplier_name
+    FROM purchase_bills b
+    LEFT JOIN suppliers s ON b.supplier_id = s.id
+    ${cogFilter}
+    ORDER BY b.bill_date DESC
+  `).all()
+
+  res.json({
+    revenue,
+    cogs,
+    expenses: expenseRows,
+    totalExpenses,
+    grossProfit: revenue - cogs,
+    netProfit: revenue - cogs - totalExpenses,
+    billBreakdown,
+  })
 })
 
 // ── SUPPLIERS ─────────────────────────────────────────────
@@ -78,7 +107,7 @@ router.put('/suppliers/:id', adminAuth, (req, res) => {
   res.json(updated)
 })
 
-// ── COGS ──────────────────────────────────────────────────
+// ── COGS (legacy — kept for archive compatibility) ─────────
 
 router.get('/cogs', adminAuth, (req, res) => {
   const { month } = req.query
@@ -99,7 +128,7 @@ router.post('/cogs', adminAuth, (req, res) => {
     db.prepare('UPDATE suppliers SET total_paid = total_paid + ? WHERE id = ?').run(total, supplier_id)
   }
   const entry = db.prepare('SELECT * FROM cogs_entries WHERE id = ?').get(result.lastInsertRowid)
-  auditLog({ req, action: 'CREATE', entity: 'cogs', entityId: entry.id, description: `COGS entry: "${item_name}" qty ${quantity} @ $${unit_cost} = $${total.toFixed(2)}`, newValue: entry })
+  auditLog({ req, action: 'CREATE', entity: 'cogs', entityId: entry.id, description: `COGS entry: "${item_name}" qty ${quantity} @ ${unit_cost} = ${total.toFixed(2)}`, newValue: entry })
   res.json(entry)
 })
 

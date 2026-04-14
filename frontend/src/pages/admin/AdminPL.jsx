@@ -62,8 +62,16 @@ export default function AdminPL() {
               <PLTotal label="Total Income" value={data.revenue} />
 
               <PLSection title="COST OF GOODS SOLD" />
-              <PLRow label="Supplier / Material Costs" value={-data.cogs} />
-              <PLTotal label="Total COGS" value={-data.cogs} />
+<PLRow label="Purchase Bills (paid/partial)" value={-data.cogs} />
+{data.billBreakdown?.map(b => (
+  <PLRow
+    key={b.id}
+    label={`  ${b.supplier_name || 'Unknown'} — ${b.bill_number || 'Bill #' + b.id}`}
+    value={-b.total}
+    muted
+  />
+))}
+<PLTotal label="Total COGS" value={-data.cogs} />
 
               <PLSection title="OPERATING EXPENSES" />
               {data.expenses.length === 0
