@@ -1,419 +1,294 @@
-import { useState, useEffect, useRef } from 'react'
-import adminApi from '../../lib/adminApi'
-import {
-  PageHeader, PageContent, KpiGrid, KpiCard,
-  Card, CardHeader, Table, Tr, Td, ExpandedRow,
-  Btn, Input, Select, Spinner, Empty,
-  Modal, ModalFooter, StatusPill, tokens as T
-} from '../../components/admin/AdminUI'
+const express   = require('express')
+const router    = express.Router()
+const db        = require('../db')
+const adminAuth = require('../middleware/adminAuth')
+const { auditLog } = require('../middleware/auditLog')
+const multer    = require('multer')
+const path      = require('path')
+const fs        = require('fs')
 
-const BANKS = ['BOC', 'Peoples Bank', 'Cash', 'Other']
+const uploadDir = path.join(__dirname, '../uploads/bills')
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true })
 
-export default function AdminBills() {
-  const [bills,     setBills]     = useState([])
-  const [suppliers, setSuppliers] = useState([])
-  const [materials, setMaterials] = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [expanded,  setExpanded]  = useState(null)
-  const [modal,     setModal]     = useState(null)   // null | 'new' | 'pay' (bill obj)
-  const [saving,    setSaving]    = useState(false)
-  const [imageModal,setImageModal]= useState(null)
-  const fileRef = useRef()
-
-  // New bill form
-  const emptyForm = () => ({ supplier_id:'', bill_date:today(), due_date:'', notes:'', items:[{ material_id:'', qty:'', unit_cost:'' }] })
-  const [form,    setForm]    = useState(emptyForm())
-  const [billImg, setBillImg] = useState(null)
-  const [imgPrev, setImgPrev] = useState(null)
-
-  // Payment form
-  const [payForm, setPayForm] = useState({ amount:'', payment_date:today(), payment_method:'bank', bank_account:'BOC', notes:'' })
-
-  function today() { return new Date().toISOString().split('T')[0] }
-
-  useEffect(() => { load() }, [])
-
-  async function load() {
-    setLoading(true)
-    try {
-      const [b, s, m] = await Promise.all([
-        adminApi.get('/bills'),
-        adminApi.get('/suppliers'),
-        adminApi.get('/materials'),
-      ])
-      setBills(b.data)
-      setSuppliers(s.data)
-      setMaterials(m.data)
-    } finally { setLoading(false) }
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const unique = `bill_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    cb(null, unique + path.extname(file.originalname))
   }
-
-  // ── Bill image pick ───────────────────────────────────────────
-  function handleImage(file) {
-    if (!file) return
-    setBillImg(file)
-    if (file.type.startsWith('image/')) {
-      const r = new FileReader()
-      r.onload = e => setImgPrev(e.target.result)
-      r.readAsDataURL(file)
-    } else { setImgPrev('pdf') }
+})
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|pdf|webp/
+    if (allowed.test(path.extname(file.originalname).toLowerCase())) return cb(null, true)
+    cb(new Error('Only images and PDF allowed'))
   }
+})
 
-  // ── Line items ────────────────────────────────────────────────
-  function addItem()        { setForm(f => ({ ...f, items:[...f.items, { material_id:'', qty:'', unit_cost:'' }] })) }
-  function removeItem(i)    { setForm(f => ({ ...f, items:f.items.filter((_,idx)=>idx!==i) })) }
-  function updateItem(i, k, v) {
-    setForm(f => {
-      const items = [...f.items]
-      items[i] = { ...items[i], [k]:v }
-      // Auto-fill unit cost from material avg_cost
-      if (k === 'material_id' && v) {
-        const mat = materials.find(m => String(m.id) === String(v))
-        if (mat && mat.avg_cost > 0) items[i].unit_cost = String(mat.avg_cost.toFixed(2))
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001'
+
+// ── Helper: recalculate average cost for a material ───────────
+function recalcAvgCost(materialId) {
+  const history = db.prepare(`
+    SELECT SUM(qty) as total_qty, SUM(total) as total_cost
+    FROM material_cost_history
+    WHERE material_id = ? AND source != 'consumption'
+  `).get(materialId)
+
+  const totalQty  = history.total_qty  || 0
+  const totalCost = history.total_cost || 0
+  const avgCost   = totalQty > 0 ? totalCost / totalQty : 0
+
+  db.prepare('UPDATE materials SET avg_cost = ? WHERE id = ?').run(avgCost, materialId)
+  return avgCost
+}
+
+// ── Helper: recalc cost_price for all handmade products using a material ──
+function recalcProductCosts(materialId) {
+  const affectedProducts = db.prepare(`
+    SELECT DISTINCT pm.product_id
+    FROM product_materials pm
+    JOIN products p ON pm.product_id = p.id
+    WHERE pm.material_id = ? AND p.category = 'handmade'
+  `).all(materialId)
+
+  affectedProducts.forEach(({ product_id }) => {
+    const totalCost = db.prepare(`
+      SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
+      FROM product_materials pm
+      JOIN materials m ON pm.material_id = m.id
+      WHERE pm.product_id = ?
+    `).get(product_id).total
+
+    db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(totalCost, product_id)
+  })
+}
+
+// ── Helper: generate bill number BILL-YYYY-00001 ──────────────
+function generateBillNumber() {
+  const year = new Date().getFullYear()
+  const last = db.prepare(`
+    SELECT bill_number FROM purchase_bills
+    WHERE bill_number LIKE 'BILL-${year}-%'
+    ORDER BY id DESC LIMIT 1
+  `).get()
+
+  let seq = 1
+  if (last) {
+    const parts = last.bill_number.split('-')
+    seq = parseInt(parts[2]) + 1
+  }
+  return `BILL-${year}-${String(seq).padStart(5, '0')}`
+}
+
+// ── GET all bills ─────────────────────────────────────────────
+router.get('/', adminAuth, (req, res) => {
+  const { supplier_id, status } = req.query
+  let sql = `
+    SELECT b.*, s.name as supplier_name,
+      COALESCE((SELECT SUM(amount) FROM bill_payments WHERE bill_id = b.id), 0) as amount_paid
+    FROM purchase_bills b
+    LEFT JOIN suppliers s ON b.supplier_id = s.id
+    WHERE 1=1
+  `
+  const params = []
+  if (supplier_id) { sql += ' AND b.supplier_id = ?'; params.push(supplier_id) }
+  if (status)      { sql += ' AND b.status = ?';      params.push(status) }
+  sql += ' ORDER BY b.bill_date DESC, b.created_at DESC'
+
+  const bills = db.prepare(sql).all(...params)
+  res.json(bills.map(b => ({
+    ...b,
+    bill_image_url: b.bill_image ? `${BASE_URL}/uploads/bills/${b.bill_image}` : null,
+    outstanding: b.total - b.amount_paid,
+  })))
+})
+
+// ── GET single bill with items ────────────────────────────────
+router.get('/:id', adminAuth, (req, res) => {
+  const bill = db.prepare(`
+    SELECT b.*, s.name as supplier_name,
+      COALESCE((SELECT SUM(amount) FROM bill_payments WHERE bill_id = b.id), 0) as amount_paid
+    FROM purchase_bills b
+    LEFT JOIN suppliers s ON b.supplier_id = s.id
+    WHERE b.id = ?
+  `).get(req.params.id)
+  if (!bill) return res.status(404).json({ error: 'Not found' })
+
+  const items = db.prepare(`
+    SELECT i.*, m.name as material_name, m.unit
+    FROM purchase_bill_items i
+    JOIN materials m ON i.material_id = m.id
+    WHERE i.bill_id = ?
+  `).all(req.params.id)
+
+  const payments = db.prepare(`
+    SELECT * FROM bill_payments WHERE bill_id = ? ORDER BY payment_date DESC
+  `).all(req.params.id)
+
+  res.json({
+    ...bill,
+    bill_image_url: bill.bill_image ? `${BASE_URL}/uploads/bills/${bill.bill_image}` : null,
+    outstanding: bill.total - bill.amount_paid,
+    items,
+    payments,
+  })
+})
+
+// ── POST create bill ──────────────────────────────────────────
+router.post('/', adminAuth, upload.single('bill_image'), (req, res) => {
+  try {
+    const { supplier_id, bill_date, due_date, notes } = req.body
+    let items = []
+    try { items = JSON.parse(req.body.items || '[]') } catch { items = [] }
+
+    if (!items.length) return res.status(400).json({ error: 'At least one item required' })
+
+    for (const item of items) {
+      const mat = db.prepare('SELECT id FROM materials WHERE id = ?').get(item.material_id)
+      if (!mat) return res.status(400).json({ error: `Material ID ${item.material_id} not found` })
+    }
+
+    const bill_number = generateBillNumber()
+    const subtotal = items.reduce((s, i) => s + (parseFloat(i.qty) * parseFloat(i.unit_cost)), 0)
+    const total    = subtotal
+    const bill_image = req.file ? req.file.filename : null
+
+    const saveBill = db.transaction(() => {
+      const billResult = db.prepare(`
+        INSERT INTO purchase_bills (bill_number, supplier_id, bill_date, due_date, notes, bill_image, subtotal, total, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unpaid')
+      `).run(
+        bill_number,
+        supplier_id || null,
+        bill_date   || new Date().toISOString().split('T')[0],
+        due_date    || null,
+        notes       || '',
+        bill_image,
+        subtotal,
+        total
+      )
+      const billId = billResult.lastInsertRowid
+
+      items.forEach(item => {
+        const qty      = parseFloat(item.qty)
+        const unitCost = parseFloat(item.unit_cost)
+        const lineTotal = qty * unitCost
+
+        db.prepare(`
+          INSERT INTO purchase_bill_items (bill_id, material_id, qty, unit_cost, total)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(billId, item.material_id, qty, unitCost, lineTotal)
+
+        db.prepare(`
+          INSERT INTO material_cost_history (material_id, source, source_id, qty, unit_cost, total, date)
+          VALUES (?, 'bill', ?, ?, ?, ?, ?)
+        `).run(item.material_id, billId, qty, unitCost, lineTotal, bill_date || new Date().toISOString().split('T')[0])
+
+        db.prepare(`
+          UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?
+        `).run(qty, item.material_id)
+
+        recalcAvgCost(item.material_id)
+        recalcProductCosts(item.material_id)  // ← auto update handmade product costs
+      })
+
+      if (supplier_id) {
+        db.prepare('UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?').run(total, supplier_id)
       }
-      return { ...f, items }
+
+      return billId
     })
+
+    const billId = saveBill()
+    const created = db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
+
+    auditLog({
+      req, action: 'CREATE', entity: 'bill', entityId: billId,
+      description: `Created bill ${bill_number} — Rs ${total.toLocaleString()}`,
+      newValue: created
+    })
+
+    res.json({ ...created, bill_image_url: bill_image ? `${BASE_URL}/uploads/bills/${bill_image}` : null })
+
+  } catch (err) {
+    console.error('Bill error:', err)
+    res.status(500).json({ error: err.message })
   }
+})
 
-  const billTotal = form.items.reduce((s, i) => s + ((parseFloat(i.qty)||0) * (parseFloat(i.unit_cost)||0)), 0)
+// ── POST record payment against a bill ───────────────────────
+router.post('/:id/pay', adminAuth, (req, res) => {
+  const { amount, payment_date, payment_method, bank_account, notes } = req.body
+  const bill = db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
+  if (!bill) return res.status(404).json({ error: 'Bill not found' })
 
-  // ── Save bill ─────────────────────────────────────────────────
-  async function saveBill() {
-    const validItems = form.items.filter(i => i.material_id && i.qty && i.unit_cost)
-    if (!validItems.length) return alert('Add at least one complete line item')
-    setSaving(true)
-    try {
-      const fd = new FormData()
-      fd.append('supplier_id', form.supplier_id)
-      fd.append('bill_date',   form.bill_date)
-      fd.append('due_date',    form.due_date)
-      fd.append('notes',       form.notes)
-      fd.append('items',       JSON.stringify(validItems))
-      if (billImg) fd.append('bill_image', billImg)
-      await adminApi.post('/bills', fd)
-      await load()
-      setModal(null)
-      setForm(emptyForm())
-      setBillImg(null)
-      setImgPrev(null)
-    } finally { setSaving(false) }
-  }
+  const payAmount = parseFloat(amount)
+  if (!payAmount || payAmount <= 0) return res.status(400).json({ error: 'Invalid amount' })
 
-  // ── Record payment ────────────────────────────────────────────
-  async function savePayment() {
-    if (!payForm.amount) return
-    setSaving(true)
-    try {
-      await adminApi.post(`/bills/${modal.id}/pay`, payForm)
-      await load()
-      setModal(null)
-    } finally { setSaving(false) }
-  }
+  const recordPayment = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      req.params.id, payAmount,
+      payment_date    || new Date().toISOString().split('T')[0],
+      payment_method  || 'bank',
+      bank_account    || null,
+      notes           || ''
+    )
 
-  // ── Delete bill ───────────────────────────────────────────────
-  async function deleteBill(id) {
-    if (!confirm('Delete this bill? Stock will be reversed.')) return
-    try { await adminApi.delete(`/bills/${id}`); await load() }
-    catch (e) { alert(e.response?.data?.error || 'Cannot delete this bill') }
-  }
+    const totalPaid = db.prepare('SELECT SUM(amount) as s FROM bill_payments WHERE bill_id = ?').get(req.params.id).s || 0
+    let status = 'unpaid'
+    if (totalPaid >= bill.total)  status = 'paid'
+    else if (totalPaid > 0)       status = 'partial'
+    db.prepare('UPDATE purchase_bills SET status = ? WHERE id = ?').run(status, req.params.id)
 
-  // ── KPIs ──────────────────────────────────────────────────────
-  const totalBilled  = bills.reduce((s, b) => s + b.total, 0)
-  const totalPaid    = bills.reduce((s, b) => s + (b.amount_paid || 0), 0)
-  const outstanding  = totalBilled - totalPaid
-  const unpaidCount  = bills.filter(b => b.status === 'unpaid').length
+    if (bill.supplier_id) {
+      db.prepare('UPDATE suppliers SET total_paid = total_paid + ? WHERE id = ?').run(payAmount, bill.supplier_id)
+    }
+  })
 
-  const billStatusCfg = {
-    unpaid:  { label:'Unpaid',  color:T.pink, bg:'rgba(255,45,120,0.12)'  },
-    partial: { label:'Partial', color:T.gold, bg:'rgba(255,197,61,0.14)'  },
-    paid:    { label:'Paid',    color:T.lime, bg:'rgba(184,255,60,0.12)'  },
-  }
+  recordPayment()
 
-  return (
-    <>
-      <PageHeader
-        title="Bills"
-        subtitle="Supplier purchase bills"
-        action={<Btn onClick={() => { setForm(emptyForm()); setBillImg(null); setImgPrev(null); setModal('new') }}>+ New Bill</Btn>}
-      />
-      <PageContent>
+  auditLog({
+    req, action: 'UPDATE', entity: 'bill', entityId: req.params.id,
+    description: `Payment Rs ${payAmount.toLocaleString()} recorded for bill ${bill.bill_number}`,
+    newValue: { amount: payAmount, payment_method, bank_account }
+  })
 
-        <KpiGrid>
-          <KpiCard label="Total Billed"   value={`Rs ${Math.round(totalBilled).toLocaleString()}`} accent />
-          <KpiCard label="Total Paid"     value={`Rs ${Math.round(totalPaid).toLocaleString()}`} />
-          <KpiCard label="Outstanding"    value={`Rs ${Math.round(outstanding).toLocaleString()}`}
-            change={outstanding > 0 ? 'Unpaid balance' : 'All clear'}
-            changeUp={outstanding === 0}
-          />
-          <KpiCard label="Unpaid Bills"   value={unpaidCount}
-            change={unpaidCount > 0 ? 'Needs payment' : 'All paid'}
-            changeUp={unpaidCount === 0}
-          />
-        </KpiGrid>
+  res.json({ success: true })
+})
 
-        <Card>
-          <CardHeader title={`${bills.length} bills`} />
-          {loading ? <Spinner /> : bills.length === 0 ? (
-            <Empty message="No bills yet — create your first purchase bill" />
-          ) : (
-            <Table headers={['Bill #', 'Supplier', 'Date', 'Total', 'Paid', 'Outstanding', 'Status', 'Actions']}>
-              {bills.map(b => {
-                const cfg = billStatusCfg[b.status] || billStatusCfg.unpaid
-                const outstanding = b.total - (b.amount_paid || 0)
-                return (
-                  <>
-                    <Tr key={b.id} onClick={() => setExpanded(expanded === b.id ? null : b.id)}>
-                      <Td>
-                        <span style={{ fontFamily:'monospace', fontSize:12, color:T.gold, fontWeight:700 }}>
-                          {b.bill_number}
-                        </span>
-                      </Td>
-                      <Td>{b.supplier_name || <span style={{ color:T.muted }}>No supplier</span>}</Td>
-                      <Td muted>{b.bill_date}</Td>
-                      <Td style={{ fontWeight:700, color:T.text }}>Rs {Number(b.total).toLocaleString()}</Td>
-                      <Td style={{ color:T.lime }}>Rs {Number(b.amount_paid||0).toLocaleString()}</Td>
-                      <Td style={{ color: outstanding > 0 ? T.pink : T.lime, fontWeight:700 }}>
-                        Rs {Number(outstanding).toLocaleString()}
-                      </Td>
-                      <Td>
-                        <span style={{ fontSize:10, fontWeight:700, padding:'3px 10px', borderRadius:99, background:cfg.bg, color:cfg.color, letterSpacing:'0.08em', textTransform:'uppercase' }}>
-                          {cfg.label}
-                        </span>
-                      </Td>
-                      <Td onClick={e => e.stopPropagation()}>
-                        <div style={{ display:'flex', gap:6 }}>
-                          {b.status !== 'paid' && (
-                            <Btn size="sm" onClick={() => { setPayForm({ amount:'', payment_date:today(), payment_method:'bank', bank_account:'BOC', notes:'' }); setModal(b) }}>
-                              Pay
-                            </Btn>
-                          )}
-                          {b.status === 'unpaid' && (
-                            <Btn size="sm" variant="danger" onClick={() => deleteBill(b.id)}>Del</Btn>
-                          )}
-                        </div>
-                      </Td>
-                    </Tr>
+// ── DELETE bill ───────────────────────────────────────────────
+router.delete('/:id', adminAuth, (req, res) => {
+  const bill = db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
+  if (!bill) return res.status(404).json({ error: 'Not found' })
+  if (bill.status !== 'unpaid') return res.status(400).json({ error: 'Cannot delete a paid or partial bill' })
 
-                    {/* Expanded row */}
-                    {expanded === b.id && (
-                      <ExpandedRow key={`${b.id}-exp`} colSpan={8}>
-                        <BillDetail billId={b.id} imageModal={setImageModal} />
-                      </ExpandedRow>
-                    )}
-                  </>
-                )
-              })}
-            </Table>
-          )}
-        </Card>
-      </PageContent>
+  const deleteBill = db.transaction(() => {
+    const items = db.prepare('SELECT * FROM purchase_bill_items WHERE bill_id = ?').all(bill.id)
 
-      {/* ── New Bill Modal ── */}
-      {modal === 'new' && (
-        <Modal title="New Purchase Bill" onClose={() => setModal(null)} width={640}>
-          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+    items.forEach(item => {
+      db.prepare('UPDATE materials SET qty_in_stock = qty_in_stock - ? WHERE id = ?').run(item.qty, item.material_id)
+      db.prepare('DELETE FROM material_cost_history WHERE source = ? AND source_id = ?').run('bill', bill.id)
+      recalcAvgCost(item.material_id)
+      recalcProductCosts(item.material_id)  // ← auto update handmade product costs
+    })
 
-            {/* Supplier + Dates */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-              <Select label="Supplier" value={form.supplier_id} onChange={e => setForm(f=>({...f,supplier_id:e.target.value}))}>
-                <option value="">— No supplier —</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-              <Input label="Bill Date" type="date" value={form.bill_date} onChange={e => setForm(f=>({...f,bill_date:e.target.value}))} />
-              <Input label="Due Date"  type="date" value={form.due_date}  onChange={e => setForm(f=>({...f,due_date:e.target.value}))}  />
-            </div>
+    if (bill.supplier_id) {
+      db.prepare('UPDATE suppliers SET total_billed = total_billed - ? WHERE id = ?').run(bill.total, bill.supplier_id)
+    }
 
-            {/* Line items */}
-            <div>
-              <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:10 }}>
-                Items
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {form.items.map((item, i) => {
-                  const mat = materials.find(m => String(m.id) === String(item.material_id))
-                  const lineTotal = (parseFloat(item.qty)||0) * (parseFloat(item.unit_cost)||0)
-                  return (
-                    <div key={i} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
-                      <Select value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
-                        <option value="">— Select material —</option>
-                        {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-                      </Select>
-                      <Input type="number" placeholder="Qty" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
-                      <Input type="number" step="0.01" placeholder="Unit cost" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
-                      <div style={{ fontSize:12, color:T.pink, fontWeight:700, padding:'9px 0', textAlign:'right' }}>
-                        {lineTotal > 0 ? `Rs ${lineTotal.toLocaleString()}` : '—'}
-                      </div>
-                      <button onClick={() => removeItem(i)} style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:18, padding:'4px 8px' }}>×</button>
-                    </div>
-                  )
-                })}
-              </div>
-              <button onClick={addItem} style={{ marginTop:8, background:'none', border:`1px dashed ${T.border}`, borderRadius:8, color:T.muted, fontSize:12, cursor:'pointer', padding:'7px 14px', width:'100%', fontFamily:T.font, transition:'all 0.15s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = T.pink; e.currentTarget.style.color = T.pink }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.muted }}
-              >
-                + Add Item
-              </button>
-            </div>
+    db.prepare('DELETE FROM purchase_bill_items WHERE bill_id = ?').run(bill.id)
+    db.prepare('DELETE FROM purchase_bills WHERE id = ?').run(bill.id)
+  })
 
-            {/* Total */}
-            {billTotal > 0 && (
-              <div style={{ display:'flex', justifyContent:'flex-end' }}>
-                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, padding:'10px 18px', textAlign:'right' }}>
-                  <div style={{ fontSize:10, color:T.muted, textTransform:'uppercase', letterSpacing:'0.1em' }}>Bill Total</div>
-                  <div style={{ fontSize:22, fontWeight:900, color:T.pink }}>Rs {billTotal.toLocaleString()}</div>
-                </div>
-              </div>
-            )}
+  deleteBill()
+  auditLog({ req, action: 'DELETE', entity: 'bill', entityId: req.params.id, description: `Deleted bill ${bill.bill_number}`, oldValue: bill })
+  res.json({ success: true })
+})
 
-            {/* Notes */}
-            <Input label="Notes" value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional note" />
-
-            {/* Bill image */}
-            <div>
-              <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:8 }}>
-                Attach Bill / Receipt
-              </div>
-              <div
-                onClick={() => fileRef.current?.click()}
-                style={{ border:`2px dashed ${T.border}`, borderRadius:12, padding:'20px', textAlign:'center', cursor:'pointer', transition:'all 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = T.pink}
-                onMouseLeave={e => e.currentTarget.style.borderColor = T.border}
-              >
-                {imgPrev && imgPrev !== 'pdf' && <img src={imgPrev} alt="" style={{ maxHeight:80, borderRadius:8, marginBottom:8 }} />}
-                {imgPrev === 'pdf' && <div style={{ fontSize:28, marginBottom:4 }}>📄</div>}
-                <div style={{ fontSize:12, color:T.muted }}>{billImg ? billImg.name : 'Click to attach image or PDF'}</div>
-                <input ref={fileRef} type="file" accept="image/*,.pdf" hidden onChange={e => handleImage(e.target.files[0])} />
-              </div>
-            </div>
-          </div>
-          <ModalFooter onClose={() => setModal(null)} onSave={saveBill} saving={saving} saveLabel="Save Bill" />
-        </Modal>
-      )}
-
-      {/* ── Payment Modal ── */}
-      {modal && modal !== 'new' && (
-        <Modal title={`Record Payment — ${modal.bill_number}`} onClose={() => setModal(null)} width={420}>
-          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-            {/* Outstanding */}
-            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, padding:'14px 16px', display:'flex', justifyContent:'space-between' }}>
-              <span style={{ fontSize:12, color:T.muted }}>Outstanding</span>
-              <span style={{ fontSize:16, fontWeight:900, color:T.pink }}>
-                Rs {Number(modal.total - (modal.amount_paid||0)).toLocaleString()}
-              </span>
-            </div>
-            <Input label="Amount Paid (Rs)" type="number" step="0.01" value={payForm.amount} onChange={e => setPayForm(f=>({...f,amount:e.target.value}))} placeholder="0.00" />
-            <Input label="Payment Date" type="date" value={payForm.payment_date} onChange={e => setPayForm(f=>({...f,payment_date:e.target.value}))} />
-            <Select label="Payment Method" value={payForm.payment_method} onChange={e => setPayForm(f=>({...f,payment_method:e.target.value}))}>
-              <option value="bank">Bank Transfer</option>
-              <option value="cash">Cash</option>
-            </Select>
-            {payForm.payment_method === 'bank' && (
-              <Select label="Bank Account" value={payForm.bank_account} onChange={e => setPayForm(f=>({...f,bank_account:e.target.value}))}>
-                {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
-              </Select>
-            )}
-            <Input label="Notes" value={payForm.notes} onChange={e => setPayForm(f=>({...f,notes:e.target.value}))} placeholder="Optional" />
-          </div>
-          <ModalFooter onClose={() => setModal(null)} onSave={savePayment} saving={saving} saveLabel="Record Payment" />
-        </Modal>
-      )}
-
-      {/* Image lightbox */}
-      {imageModal && (
-        <div onClick={() => setImageModal(null)} style={{ position:'fixed', inset:0, zIndex:9999, background:'rgba(0,0,0,0.9)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
-          {imageModal.endsWith('.pdf') || imageModal.includes('pdf')
-            ? <iframe src={imageModal} style={{ width:'90vw', height:'90vh', borderRadius:12 }} />
-            : <img src={imageModal} alt="Bill" style={{ maxWidth:'90vw', maxHeight:'90vh', borderRadius:12, objectFit:'contain' }} onClick={e => e.stopPropagation()} />
-          }
-          <button onClick={() => setImageModal(null)} style={{ position:'fixed', top:20, right:24, background:'rgba(255,255,255,0.1)', border:'none', color:'white', fontSize:28, width:44, height:44, borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
-        </div>
-      )}
-    </>
-  )
-}
-
-// ── Expanded Bill Detail ──────────────────────────────────────
-function BillDetail({ billId, imageModal }) {
-  const [data,    setData]    = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    adminApi.get(`/bills/${billId}`)
-      .then(r => setData(r.data))
-      .finally(() => setLoading(false))
-  }, [billId])
-
-  if (loading) return <div style={{ padding:20 }}><Spinner /></div>
-  if (!data)   return null
-
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:20, padding:'8px 4px' }}>
-
-      {/* Line Items */}
-      <div>
-        <SLabel>Line Items</SLabel>
-        {data.items.map((item, i) => (
-          <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:`1px solid ${T.border}`, fontSize:13 }}>
-            <div>
-              <div style={{ color:T.text, fontWeight:600 }}>{item.material_name}</div>
-              <div style={{ color:T.muted, fontSize:11 }}>{item.qty} {item.unit} @ Rs {Number(item.unit_cost).toFixed(2)}</div>
-            </div>
-            <div style={{ color:T.pink, fontWeight:700 }}>Rs {Number(item.total).toLocaleString()}</div>
-          </div>
-        ))}
-        <div style={{ display:'flex', justifyContent:'flex-end', paddingTop:10, fontWeight:900, color:T.text, fontSize:14 }}>
-          Total: Rs {Number(data.total).toLocaleString()}
-        </div>
-      </div>
-
-      {/* Payments */}
-      <div>
-        <SLabel>Payment History</SLabel>
-        {!data.payments?.length ? (
-          <div style={{ color:T.muted, fontSize:12, padding:'10px 0' }}>No payments yet</div>
-        ) : data.payments.map((p, i) => (
-          <div key={i} style={{ padding:'8px 0', borderBottom:`1px solid ${T.border}`, fontSize:12 }}>
-            <div style={{ display:'flex', justifyContent:'space-between' }}>
-              <span style={{ color:T.lime, fontWeight:700 }}>Rs {Number(p.amount).toLocaleString()}</span>
-              <span style={{ color:T.muted }}>{p.payment_date}</span>
-            </div>
-            <div style={{ color:T.muted, marginTop:2 }}>{p.bank_account || p.payment_method}</div>
-          </div>
-        ))}
-        <div style={{ paddingTop:10, display:'flex', justifyContent:'space-between', fontSize:12 }}>
-          <span style={{ color:T.muted }}>Outstanding</span>
-          <span style={{ color: data.outstanding > 0 ? T.pink : T.lime, fontWeight:700 }}>
-            Rs {Number(data.outstanding).toLocaleString()}
-          </span>
-        </div>
-      </div>
-
-      {/* Bill image + notes */}
-      <div>
-        <SLabel>Bill Document</SLabel>
-        {data.bill_image_url ? (
-          <div
-            onClick={() => imageModal(data.bill_image_url)}
-            style={{ cursor:'pointer', borderRadius:10, overflow:'hidden', border:`1px solid ${T.border}`, marginBottom:10 }}
-          >
-            {data.bill_image_url.match(/\.(jpg|jpeg|png|webp)$/i)
-              ? <img src={data.bill_image_url} alt="Bill" style={{ width:'100%', maxHeight:120, objectFit:'cover', display:'block' }}
-                  onMouseEnter={e => e.target.style.opacity=0.8}
-                  onMouseLeave={e => e.target.style.opacity=1}
-                />
-              : <div style={{ padding:'16px', textAlign:'center', color:T.pink, fontSize:13, fontWeight:700 }}>📄 View PDF</div>
-            }
-          </div>
-        ) : (
-          <div style={{ color:T.muted, fontSize:12, padding:'10px 0' }}>No document attached</div>
-        )}
-        {data.notes && <div style={{ fontSize:12, color:T.muted, marginTop:8 }}>{data.notes}</div>}
-      </div>
-
-    </div>
-  )
-}
-
-function SLabel({ children }) {
-  return <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:'0.12em', textTransform:'uppercase', marginBottom:10 }}>{children}</div>
-}
+module.exports = router

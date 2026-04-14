@@ -6,10 +6,9 @@ import {
   Modal, ModalFooter, tokens as T
 } from '../../components/admin/AdminUI'
 
-const CATS    = ['Charms & pendents', 'plain', 'signature', 'bangle', 'supplies']
+const CATS    = ['Charms & pendents', 'plain', 'signature', 'bangle', 'supplies', 'handmade']
 const SUBCATS = ['Butterfly Charms', 'Shell Charms', 'Daisy Charms', 'Flower Charms', 'Heart Charms', 'Premium Charms', 'Star & Sea Charms', 'Other Charms']
 
-// ── Build groups from flat product list ───────────────────────
 function buildGroups(products) {
   const map = {}
   const order = []
@@ -21,7 +20,6 @@ function buildGroups(products) {
   return order.map(key => ({ key, label: key === '__none__' ? 'No Group' : key, items: map[key] }))
 }
 
-// ── Serialize groups back to reorder payload ──────────────────
 function toReorderPayload(groups) {
   return groups.map((g, gi) => ({
     subcategory: g.key,
@@ -99,13 +97,11 @@ export default function AdminProducts() {
     finally { setSyncing(false) }
   }
 
-  // ── Group-level drag ──────────────────────────────────────────
   function handleGroupReorder(newGroups) {
     setGroups(newGroups)
     persistOrder(newGroups)
   }
 
-  // ── Item-level drag within a group ────────────────────────────
   function handleItemReorder(groupKey, newItems) {
     const newGroups = groups.map(g => g.key === groupKey ? { ...g, items: newItems } : g)
     setGroups(newGroups)
@@ -185,20 +181,12 @@ export default function AdminProducts() {
   )
 }
 
-// ── GroupBoard — drag groups up/down ──────────────────────────
 function GroupBoard({ groups, onGroupReorder, onItemReorder, onEdit, onDelete, stockStatus }) {
   const [dragGroupIdx, setDragGroupIdx] = useState(null)
   const [overGroupIdx, setOverGroupIdx] = useState(null)
 
-  function onGroupDragStart(e, idx) {
-    setDragGroupIdx(idx)
-    e.dataTransfer.effectAllowed = 'move'
-    suppressGhost(e)
-  }
-  function onGroupDragOver(e, idx) {
-    e.preventDefault()
-    if (idx !== overGroupIdx) setOverGroupIdx(idx)
-  }
+  function onGroupDragStart(e, idx) { setDragGroupIdx(idx); e.dataTransfer.effectAllowed = 'move'; suppressGhost(e) }
+  function onGroupDragOver(e, idx)  { e.preventDefault(); if (idx !== overGroupIdx) setOverGroupIdx(idx) }
   function onGroupDrop(e, idx) {
     e.preventDefault()
     if (dragGroupIdx === null || dragGroupIdx === idx) { resetGroup(); return }
@@ -212,12 +200,10 @@ function GroupBoard({ groups, onGroupReorder, onItemReorder, onEdit, onDelete, s
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-      {/* Hint bar */}
       <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:T.surface, borderRadius:12, border:`1px solid ${T.border}` }}>
         <span style={{ fontSize:16 }}>↕</span>
         <span style={{ fontSize:12, color:T.muted }}>Drag <strong style={{color:T.text}}>group headers</strong> to reorder sections · Drag <strong style={{color:T.text}}>cards</strong> to reorder within a group · What you see here = what customers see</span>
       </div>
-
       {groups.map((group, gi) => (
         <GroupSection
           key={group.key}
@@ -239,25 +225,14 @@ function GroupBoard({ groups, onGroupReorder, onItemReorder, onEdit, onDelete, s
   )
 }
 
-// ── GroupSection — one subcategory block ──────────────────────
 function GroupSection({ group, idx, isDragging, isOver, onDragStart, onDragOver, onDrop, onDragEnd, onItemReorder, onEdit, onDelete, stockStatus }) {
   const [itemDragIdx, setItemDragIdx] = useState(null)
   const [itemOverIdx, setItemOverIdx] = useState(null)
 
-  function onItemDragStart(e, i) {
-    e.stopPropagation() // don't trigger group drag
-    setItemDragIdx(i)
-    e.dataTransfer.effectAllowed = 'move'
-    suppressGhost(e)
-  }
-  function onItemDragOver(e, i) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (i !== itemOverIdx) setItemOverIdx(i)
-  }
+  function onItemDragStart(e, i) { e.stopPropagation(); setItemDragIdx(i); e.dataTransfer.effectAllowed = 'move'; suppressGhost(e) }
+  function onItemDragOver(e, i)  { e.preventDefault(); e.stopPropagation(); if (i !== itemOverIdx) setItemOverIdx(i) }
   function onItemDrop(e, i) {
-    e.preventDefault()
-    e.stopPropagation()
+    e.preventDefault(); e.stopPropagation()
     if (itemDragIdx === null || itemDragIdx === i) { resetItem(); return }
     const next = [...group.items]
     const [moved] = next.splice(itemDragIdx, 1)
@@ -270,71 +245,27 @@ function GroupSection({ group, idx, isDragging, isOver, onDragStart, onDragOver,
   const borderColor = isOver ? 'rgba(255,45,120,0.5)' : isDragging ? 'rgba(255,197,61,0.35)' : T.border
 
   return (
-    <div
-      style={{
-        border: `2px solid ${borderColor}`,
-        borderRadius: 16,
-        overflow: 'hidden',
-        opacity: isDragging ? 0.45 : 1,
-        transform: isOver ? 'scale(1.01)' : 'scale(1)',
-        transition: 'border-color 0.15s, transform 0.15s, opacity 0.15s',
-        boxShadow: isOver ? '0 0 24px rgba(255,45,120,0.15)' : 'none',
-      }}
-    >
-      {/* Group Header — draggable */}
+    <div style={{ border:`2px solid ${borderColor}`, borderRadius:16, overflow:'hidden', opacity:isDragging?0.45:1, transform:isOver?'scale(1.01)':'scale(1)', transition:'border-color 0.15s, transform 0.15s, opacity 0.15s', boxShadow:isOver?'0 0 24px rgba(255,45,120,0.15)':'none' }}>
       <div
         draggable
         onDragStart={e => onDragStart(e, idx)}
         onDragOver={e => onDragOver(e, idx)}
         onDrop={e => onDrop(e, idx)}
         onDragEnd={onDragEnd}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '14px 18px',
-          background: T.surface,
-          borderBottom: `1px solid ${T.border}`,
-          cursor: 'grab',
-          userSelect: 'none',
-        }}
+        style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 18px', background:T.surface, borderBottom:`1px solid ${T.border}`, cursor:'grab', userSelect:'none' }}
       >
-        {/* Drag handle */}
         <span style={{ fontSize:16, color:T.muted, letterSpacing:2 }}>⠿⠿</span>
-        {/* Group number badge */}
-        <span style={{ fontSize:10, fontWeight:900, color:T.muted, background:T.faint, padding:'2px 8px', borderRadius:6 }}>
-          #{idx + 1}
-        </span>
-        {/* Group name */}
-        <span style={{ flex:1, fontWeight:800, fontSize:14, color:T.text }}>
-          {group.label}
-        </span>
-        {/* Count */}
-        <span style={{ fontSize:11, color:T.muted }}>
-          {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
-        </span>
+        <span style={{ fontSize:10, fontWeight:900, color:T.muted, background:T.faint, padding:'2px 8px', borderRadius:6 }}>#{idx + 1}</span>
+        <span style={{ flex:1, fontWeight:800, fontSize:14, color:T.text }}>{group.label}</span>
+        <span style={{ fontSize:11, color:T.muted }}>{group.items.length} {group.items.length === 1 ? 'item' : 'items'}</span>
       </div>
-
-      {/* Product Cards Grid */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-        gap: 12,
-        padding: 14,
-        background: T.card,
-      }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:12, padding:14, background:T.card }}>
         {group.items.map((p, pi) => (
           <ProductCard
-            key={p.id}
-            product={p}
-            idx={pi}
-            isDragging={itemDragIdx === pi}
-            isOver={itemOverIdx === pi && itemDragIdx !== pi}
-            stockStatus={stockStatus}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onDragStart={onItemDragStart}
-            onDragOver={onItemDragOver}
-            onDrop={onItemDrop}
-            onDragEnd={resetItem}
+            key={p.id} product={p} idx={pi}
+            isDragging={itemDragIdx === pi} isOver={itemOverIdx === pi && itemDragIdx !== pi}
+            stockStatus={stockStatus} onEdit={onEdit} onDelete={onDelete}
+            onDragStart={onItemDragStart} onDragOver={onItemDragOver} onDrop={onItemDrop} onDragEnd={resetItem}
           />
         ))}
       </div>
@@ -342,7 +273,6 @@ function GroupSection({ group, idx, isDragging, isOver, onDragStart, onDragOver,
   )
 }
 
-// ── Product Card ──────────────────────────────────────────────
 function ProductCard({ product: p, idx, isDragging, isOver, stockStatus, onEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd }) {
   const stockCfg = {
     ok:       { bg:'rgba(22,163,74,0.15)',  color:'#4ade80' },
@@ -355,40 +285,18 @@ function ProductCard({ product: p, idx, isDragging, isOver, stockStatus, onEdit,
   return (
     <div
       draggable
-      onDragStart={e => onDragStart(e, idx)}
-      onDragOver={e => onDragOver(e, idx)}
-      onDrop={e => onDrop(e, idx)}
-      onDragEnd={onDragEnd}
-      style={{
-        background: T.surface,
-        border: `2px solid ${borderColor}`,
-        borderRadius: 12,
-        overflow: 'hidden',
-        opacity: isDragging ? 0.4 : 1,
-        transform: isOver ? 'scale(1.04)' : 'scale(1)',
-        transition: 'all 0.15s',
-        cursor: 'grab',
-        userSelect: 'none',
-        boxShadow: isOver ? '0 0 16px rgba(255,45,120,0.2)' : 'none',
-        position: 'relative',
-      }}
+      onDragStart={e => onDragStart(e, idx)} onDragOver={e => onDragOver(e, idx)}
+      onDrop={e => onDrop(e, idx)} onDragEnd={onDragEnd}
+      style={{ background:T.surface, border:`2px solid ${borderColor}`, borderRadius:12, overflow:'hidden', opacity:isDragging?0.4:1, transform:isOver?'scale(1.04)':'scale(1)', transition:'all 0.15s', cursor:'grab', userSelect:'none', boxShadow:isOver?'0 0 16px rgba(255,45,120,0.2)':'none', position:'relative' }}
     >
-      {/* Position badge */}
-      <div style={{ position:'absolute', top:6, left:6, zIndex:2, background:'rgba(0,0,0,0.6)', borderRadius:5, fontSize:8, fontWeight:900, color:T.muted, padding:'2px 6px' }}>
-        {idx + 1}
-      </div>
-      {/* Drag handle */}
+      <div style={{ position:'absolute', top:6, left:6, zIndex:2, background:'rgba(0,0,0,0.6)', borderRadius:5, fontSize:8, fontWeight:900, color:T.muted, padding:'2px 6px' }}>{idx + 1}</div>
       <div style={{ position:'absolute', top:6, right:6, zIndex:2, fontSize:11, color:T.muted }}>⠿</div>
-
-      {/* Image */}
       <div style={{ aspectRatio:'1/1', overflow:'hidden', background:'#0a0a14' }}>
         {p.image_url
           ? <img src={p.image_url} alt={p.name} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', pointerEvents:'none' }} />
           : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28 }}>📦</div>
         }
       </div>
-
-      {/* Info */}
       <div style={{ padding:'10px 10px 8px' }}>
         <div style={{ fontWeight:700, fontSize:12, color:T.text, marginBottom:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name}</div>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
@@ -397,11 +305,7 @@ function ProductCard({ product: p, idx, isDragging, isOver, stockStatus, onEdit,
             {p.stock === 0 ? 'Out' : p.stock <= 5 ? `${p.stock} left` : `${p.stock}`}
           </span>
         </div>
-        {/* Action buttons — stop propagation so they don't trigger drag */}
-        <div
-          style={{ display:'flex', gap:5 }}
-          onMouseDown={e => e.stopPropagation()}
-        >
+        <div style={{ display:'flex', gap:5 }} onMouseDown={e => e.stopPropagation()}>
           <ActionBtn onClick={() => onEdit(p)}>Edit</ActionBtn>
           <ActionBtn danger onClick={() => onDelete(p.id)}>Del</ActionBtn>
         </div>
@@ -414,23 +318,12 @@ function ActionBtn({ children, onClick, danger }) {
   const [hov, setHov] = useState(false)
   return (
     <button
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        flex:1, padding:'5px 0', fontSize:9, fontWeight:900,
-        letterSpacing:'0.5px', textTransform:'uppercase', border:'none',
-        borderRadius:6, cursor:'pointer', transition:'all 0.15s',
-        background: danger
-          ? (hov ? '#ff2d78' : 'rgba(255,45,120,0.12)')
-          : (hov ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
-        color: danger ? (hov ? 'white' : '#ff2d78') : T.text,
-      }}
+      onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ flex:1, padding:'5px 0', fontSize:9, fontWeight:900, letterSpacing:'0.5px', textTransform:'uppercase', border:'none', borderRadius:6, cursor:'pointer', transition:'all 0.15s', background:danger?(hov?'#ff2d78':'rgba(255,45,120,0.12)'):(hov?'rgba(255,255,255,0.1)':'rgba(255,255,255,0.05)'), color:danger?(hov?'white':'#ff2d78'):T.text }}
     >{children}</button>
   )
 }
 
-// ── Util: suppress default drag ghost image ───────────────────
 function suppressGhost(e) {
   const ghost = document.createElement('div')
   ghost.style.cssText = 'position:absolute;top:-9999px;'
