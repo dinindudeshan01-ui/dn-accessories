@@ -52,12 +52,12 @@ router.get('/pl', adminAuth, (req, res) => {
 
   // Expenses
   const expFilter = month
-    ? `WHERE strftime('%Y-%m', date) = '${month}'`
-    : ''
+  ? `WHERE strftime('%Y-%m', date) = '${month}'`
+  : 'WHERE 1=1'
 
   const revenue       = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
   const cogs          = db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM purchase_bills ${cogFilter}`).get().total
-  const expenseRows   = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter ? expFilter : 'WHERE 1=1'} GROUP BY category`).all()
+  const expenseRows   = db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses ${expFilter} GROUP BY category`).all()
   const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
 
   // Bill breakdown for drill-down
