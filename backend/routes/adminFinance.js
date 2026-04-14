@@ -4,8 +4,6 @@ const db      = require('../db')
 const adminAuth = require('../middleware/adminAuth')
 const { auditLog } = require('../middleware/auditLog')
 
-// ── EXPENSES ──────────────────────────────────────────────
-
 router.get('/expenses', adminAuth, (req, res) => {
   const { month } = req.query
   const expenses = month
@@ -34,8 +32,6 @@ router.delete('/expenses/:id', adminAuth, (req, res) => {
   auditLog({ req, action: 'DELETE', entity: 'expense', entityId: req.params.id, description: `Deleted expense "${old.description}" ${old.amount}`, oldValue: old })
   res.json({ success: true })
 })
-
-// ── P&L ───────────────────────────────────────────────────
 
 router.get('/pl', adminAuth, (req, res) => {
   try {
@@ -67,10 +63,7 @@ router.get('/pl', adminAuth, (req, res) => {
     `).all()
 
     res.json({
-      revenue,
-      cogs,
-      expenses: expenseRows,
-      totalExpenses,
+      revenue, cogs, expenses: expenseRows, totalExpenses,
       grossProfit: revenue - cogs,
       netProfit: revenue - cogs - totalExpenses,
       billBreakdown,
@@ -80,8 +73,6 @@ router.get('/pl', adminAuth, (req, res) => {
     res.status(500).json({ error: e.message })
   }
 })
-
-// ── SUPPLIERS ─────────────────────────────────────────────
 
 router.get('/suppliers', adminAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all())
@@ -107,8 +98,6 @@ router.put('/suppliers/:id', adminAuth, (req, res) => {
   auditLog({ req, action: 'UPDATE', entity: 'supplier', entityId: req.params.id, description: `Updated supplier "${name}"`, oldValue: old, newValue: updated })
   res.json(updated)
 })
-
-// ── COGS (legacy — kept for archive compatibility) ─────────
 
 router.get('/cogs', adminAuth, (req, res) => {
   const { month } = req.query
