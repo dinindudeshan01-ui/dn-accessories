@@ -7,7 +7,6 @@ const multer    = require('multer')
 const path      = require('path')
 const fs        = require('fs')
 
-// ── File upload for bill images ───────────────────────────────
 const uploadDir = path.join(__dirname, '../uploads/bills')
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true })
 
@@ -44,6 +43,27 @@ function recalcAvgCost(materialId) {
 
   db.prepare('UPDATE materials SET avg_cost = ? WHERE id = ?').run(avgCost, materialId)
   return avgCost
+}
+
+// ── Helper: recalc cost_price for all handmade products using a material ──
+function recalcProductCosts(materialId) {
+  const affectedProducts = db.prepare(`
+    SELECT DISTINCT pm.product_id
+    FROM product_materials pm
+    JOIN products p ON pm.product_id = p.id
+    WHERE pm.material_id = ? AND p.category = 'handmade'
+  `).all(materialId)
+
+  affectedProducts.forEach(({ product_id }) => {
+    const totalCost = db.prepare(`
+      SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
+      FROM product_materials pm
+      JOIN materials m ON pm.material_id = m.id
+      WHERE pm.product_id = ?
+    `).get(product_id).total
+
+    db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(totalCost, product_id)
+  })
 }
 
 // ── Helper: generate bill number BILL-YYYY-00001 ──────────────
@@ -118,8 +138,6 @@ router.get('/:id', adminAuth, (req, res) => {
 })
 
 // ── POST create bill ──────────────────────────────────────────
-// Body: { supplier_id, bill_date, due_date, notes, items: [{ material_id, qty, unit_cost }] }
-// File: bill image (optional)
 router.post('/', adminAuth, upload.single('bill_image'), (req, res) => {
   try {
     const { supplier_id, bill_date, due_date, notes } = req.body
@@ -128,7 +146,6 @@ router.post('/', adminAuth, upload.single('bill_image'), (req, res) => {
 
     if (!items.length) return res.status(400).json({ error: 'At least one item required' })
 
-    // Validate all materials exist
     for (const item of items) {
       const mat = db.prepare('SELECT id FROM materials WHERE id = ?').get(item.material_id)
       if (!mat) return res.status(400).json({ error: `Material ID ${item.material_id} not found` })
@@ -140,7 +157,6 @@ router.post('/', adminAuth, upload.single('bill_image'), (req, res) => {
     const bill_image = req.file ? req.file.filename : null
 
     const saveBill = db.transaction(() => {
-      // Insert bill
       const billResult = db.prepare(`
         INSERT INTO purchase_bills (bill_number, supplier_id, bill_date, due_date, notes, bill_image, subtotal, total, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unpaid')
@@ -156,34 +172,29 @@ router.post('/', adminAuth, upload.single('bill_image'), (req, res) => {
       )
       const billId = billResult.lastInsertRowid
 
-      // Insert line items + update material stock + avg cost
       items.forEach(item => {
         const qty      = parseFloat(item.qty)
         const unitCost = parseFloat(item.unit_cost)
         const lineTotal = qty * unitCost
 
-        // Insert bill item
         db.prepare(`
           INSERT INTO purchase_bill_items (bill_id, material_id, qty, unit_cost, total)
           VALUES (?, ?, ?, ?, ?)
         `).run(billId, item.material_id, qty, unitCost, lineTotal)
 
-        // Record in cost history
         db.prepare(`
           INSERT INTO material_cost_history (material_id, source, source_id, qty, unit_cost, total, date)
           VALUES (?, 'bill', ?, ?, ?, ?, ?)
         `).run(item.material_id, billId, qty, unitCost, lineTotal, bill_date || new Date().toISOString().split('T')[0])
 
-        // Update material stock
         db.prepare(`
           UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?
         `).run(qty, item.material_id)
 
-        // Recalculate average cost
         recalcAvgCost(item.material_id)
+        recalcProductCosts(item.material_id)  // ← auto update handmade product costs
       })
 
-      // Update supplier total_billed
       if (supplier_id) {
         db.prepare('UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?').run(total, supplier_id)
       }
@@ -218,7 +229,6 @@ router.post('/:id/pay', adminAuth, (req, res) => {
   if (!payAmount || payAmount <= 0) return res.status(400).json({ error: 'Invalid amount' })
 
   const recordPayment = db.transaction(() => {
-    // Insert payment
     db.prepare(`
       INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -230,14 +240,12 @@ router.post('/:id/pay', adminAuth, (req, res) => {
       notes           || ''
     )
 
-    // Recalculate bill status
     const totalPaid = db.prepare('SELECT SUM(amount) as s FROM bill_payments WHERE bill_id = ?').get(req.params.id).s || 0
     let status = 'unpaid'
-    if (totalPaid >= bill.total)      status = 'paid'
-    else if (totalPaid > 0)           status = 'partial'
+    if (totalPaid >= bill.total)  status = 'paid'
+    else if (totalPaid > 0)       status = 'partial'
     db.prepare('UPDATE purchase_bills SET status = ? WHERE id = ?').run(status, req.params.id)
 
-    // Update supplier total_paid
     if (bill.supplier_id) {
       db.prepare('UPDATE suppliers SET total_paid = total_paid + ? WHERE id = ?').run(payAmount, bill.supplier_id)
     }
@@ -263,14 +271,13 @@ router.delete('/:id', adminAuth, (req, res) => {
   const deleteBill = db.transaction(() => {
     const items = db.prepare('SELECT * FROM purchase_bill_items WHERE bill_id = ?').all(bill.id)
 
-    // Reverse stock and cost history
     items.forEach(item => {
       db.prepare('UPDATE materials SET qty_in_stock = qty_in_stock - ? WHERE id = ?').run(item.qty, item.material_id)
       db.prepare('DELETE FROM material_cost_history WHERE source = ? AND source_id = ?').run('bill', bill.id)
       recalcAvgCost(item.material_id)
+      recalcProductCosts(item.material_id)  // ← auto update handmade product costs
     })
 
-    // Reverse supplier total_billed
     if (bill.supplier_id) {
       db.prepare('UPDATE suppliers SET total_billed = total_billed - ? WHERE id = ?').run(bill.total, bill.supplier_id)
     }
