@@ -47,81 +47,128 @@ router.get('/pl', adminAuth, (req, res) => {
     const { month } = req.query
 
     const revFilter  = month
-      ? `WHERE status IN ('paid','shipped') AND strftime('%Y-%m', created_at) = '${month}'`
+      ? `WHERE status IN ('paid','shipped') AND strftime('%Y-%m', created_at) = ?`
       : `WHERE status IN ('paid','shipped')`
 
     const cogsFilter = month
-      ? `WHERE strftime('%Y-%m', date) = '${month}'`
+      ? `WHERE strftime('%Y-%m', date) = ?`
       : 'WHERE 1=1'
 
     const expFilter  = month
-      ? `WHERE strftime('%Y-%m', date) = '${month}'`
+      ? `WHERE strftime('%Y-%m', date) = ?`
       : 'WHERE 1=1'
 
     // ── Revenue — confirmed sales only ────────────────────────
-    const revenue = db.prepare(`
-      SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}
-    `).get().total
+    const revenue = month
+      ? db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get(month).total
+      : db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
 
     // ── COGS — materials actually used in sold products ────────
     // This is the ONLY correct source for COGS under accrual
-    const cogs = db.prepare(`
-      SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}
-    `).get().total
+    const cogs = month
+      ? db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get(month).total
+      : db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get().total
 
     // ── COGS breakdown by product (for drill-down) ────────────
-    const cogsByProduct = db.prepare(`
-      SELECT
-        product_name,
-        SUM(qty_sold)   as total_qty,
-        SUM(line_cost)  as total_cost,
-        COUNT(DISTINCT order_id) as order_count
-      FROM order_cogs ${cogsFilter}
-      WHERE material_name != 'No recipe'
-      GROUP BY product_name
-      ORDER BY total_cost DESC
-    `).all()
+    const cogsByProduct = month
+      ? db.prepare(`
+          SELECT
+            product_name,
+            SUM(qty_sold)   as total_qty,
+            SUM(line_cost)  as total_cost,
+            COUNT(DISTINCT order_id) as order_count
+          FROM order_cogs ${cogsFilter}
+          AND material_name != 'No recipe'
+          GROUP BY product_name
+          ORDER BY total_cost DESC
+        `).all(month)
+      : db.prepare(`
+          SELECT
+            product_name,
+            SUM(qty_sold)   as total_qty,
+            SUM(line_cost)  as total_cost,
+            COUNT(DISTINCT order_id) as order_count
+          FROM order_cogs ${cogsFilter}
+          AND material_name != 'No recipe'
+          GROUP BY product_name
+          ORDER BY total_cost DESC
+        `).all()
 
     // ── COGS breakdown by material (for drill-down) ───────────
-    const cogsByMaterial = db.prepare(`
-      SELECT
-        material_name,
-        unit,
-        SUM(qty_used)   as total_qty,
-        AVG(unit_cost)  as avg_cost,
-        SUM(line_cost)  as total_cost
-      FROM order_cogs ${cogsFilter}
-      WHERE material_name != 'No recipe'
-      GROUP BY material_name
-      ORDER BY total_cost DESC
-    `).all()
+    const cogsByMaterial = month
+      ? db.prepare(`
+          SELECT
+            material_name,
+            unit,
+            SUM(qty_used)   as total_qty,
+            AVG(unit_cost)  as avg_cost,
+            SUM(line_cost)  as total_cost
+          FROM order_cogs ${cogsFilter}
+          AND material_name != 'No recipe'
+          GROUP BY material_name
+          ORDER BY total_cost DESC
+        `).all(month)
+      : db.prepare(`
+          SELECT
+            material_name,
+            unit,
+            SUM(qty_used)   as total_qty,
+            AVG(unit_cost)  as avg_cost,
+            SUM(line_cost)  as total_cost
+          FROM order_cogs ${cogsFilter}
+          AND material_name != 'No recipe'
+          GROUP BY material_name
+          ORDER BY total_cost DESC
+        `).all()
 
     // ── Products with no recipe (COGS unknown) ────────────────
-    const noRecipe = db.prepare(`
-      SELECT product_name, SUM(qty_sold) as total_qty
-      FROM order_cogs ${cogsFilter}
-      WHERE material_name = 'No recipe'
-      GROUP BY product_name
-    `).all()
+    const noRecipe = month
+      ? db.prepare(`
+          SELECT product_name, SUM(qty_sold) as total_qty
+          FROM order_cogs ${cogsFilter}
+          AND material_name = 'No recipe'
+          GROUP BY product_name
+        `).all(month)
+      : db.prepare(`
+          SELECT product_name, SUM(qty_sold) as total_qty
+          FROM order_cogs ${cogsFilter}
+          AND material_name = 'No recipe'
+          GROUP BY product_name
+        `).all()
 
     // ── Operating expenses ────────────────────────────────────
-    const expenseRows   = db.prepare(`
-      SELECT category, COALESCE(SUM(amount), 0) as total
-      FROM expenses ${expFilter}
-      GROUP BY category
-    `).all()
+    const expenseRows = month
+      ? db.prepare(`
+          SELECT category, COALESCE(SUM(amount), 0) as total
+          FROM expenses ${expFilter}
+          GROUP BY category
+        `).all(month)
+      : db.prepare(`
+          SELECT category, COALESCE(SUM(amount), 0) as total
+          FROM expenses ${expFilter}
+          GROUP BY category
+        `).all()
+
     const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
 
     // ── Purchase bills for reference (NOT part of P&L COGS) ───
     // Shown separately so she can see what she's owed to suppliers
-    const billsThisPeriod = month ? db.prepare(`
-      SELECT COALESCE(SUM(total), 0) as total,
-             COALESCE(SUM(total) - SUM(
-               (SELECT COALESCE(SUM(amount),0) FROM bill_payments WHERE bill_id = b.id)
-             ), 0) as outstanding
-      FROM purchase_bills b
-      WHERE strftime('%Y-%m', bill_date) = '${month}'
-    `).get() : null
+    // FIX: replaced correlated subquery inside SUM() with a LEFT JOIN
+    // to avoid SQLite runtime error crashing the entire /pl endpoint
+    const billsThisPeriod = month
+      ? db.prepare(`
+          SELECT
+            COALESCE(SUM(b.total), 0) as total,
+            COALESCE(SUM(b.total) - SUM(COALESCE(bp.paid, 0)), 0) as outstanding
+          FROM purchase_bills b
+          LEFT JOIN (
+            SELECT bill_id, SUM(amount) as paid
+            FROM bill_payments
+            GROUP BY bill_id
+          ) bp ON bp.bill_id = b.id
+          WHERE strftime('%Y-%m', b.bill_date) = ?
+        `).get(month)
+      : null
 
     res.json({
       // Core P&L
