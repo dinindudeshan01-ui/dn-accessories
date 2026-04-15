@@ -5,8 +5,8 @@ const adminAuth = require('../middleware/adminAuth')
 
 // GET /api/admin/customers
 // Builds customer profiles from orders — grouped by NIC
-router.get('/', adminAuth, (req, res) => {
-  const orders = db.prepare(`
+router.get('/', adminAuth, async (req, res) => {
+  const orders = await db.prepare(`
     SELECT id, reference, full_name, nic, phone1, phone2,
            address, city, total, status, items_json, created_at
     FROM orders
@@ -50,10 +50,10 @@ router.get('/', adminAuth, (req, res) => {
 })
 
 // GET /api/admin/customers/stats
-router.get('/stats', adminAuth, (req, res) => {
-  const total     = db.prepare("SELECT COUNT(DISTINCT nic) as count FROM orders").get().count
-  const repeat    = db.prepare("SELECT COUNT(*) as count FROM (SELECT nic FROM orders GROUP BY nic HAVING COUNT(*) > 1)").get().count
-  const topSpend  = db.prepare("SELECT full_name, nic, SUM(total) as spent FROM orders GROUP BY nic ORDER BY spent DESC LIMIT 1").get()
+router.get('/stats', adminAuth, async (req, res) => {
+  const { count: total }  = await db.prepare("SELECT COUNT(DISTINCT nic) as count FROM orders").get()
+  const { count: repeat } = await db.prepare("SELECT COUNT(*) as count FROM (SELECT nic FROM orders GROUP BY nic HAVING COUNT(*) > 1)").get()
+  const topSpend          = await db.prepare("SELECT full_name, nic, SUM(total) as spent FROM orders GROUP BY nic ORDER BY spent DESC LIMIT 1").get()
   res.json({ total, repeat, topSpend })
 })
 

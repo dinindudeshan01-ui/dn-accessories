@@ -7,8 +7,8 @@ const { auditLog } = require('../middleware/auditLog')
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001'
 
 // ── GET all suppliers with live balance ───────────────────────
-router.get('/', adminAuth, (req, res) => {
-  const suppliers = db.prepare(`
+router.get('/', adminAuth, async (req, res) => {
+  const suppliers = await db.prepare(`
     SELECT s.*,
       s.opening_balance + s.total_billed               as total_owed,
       s.opening_balance + s.total_billed - s.total_paid as outstanding,
@@ -21,8 +21,8 @@ router.get('/', adminAuth, (req, res) => {
 })
 
 // ── GET single supplier with full bill history ────────────────
-router.get('/:id', adminAuth, (req, res) => {
-  const supplier = db.prepare(`
+router.get('/:id', adminAuth, async (req, res) => {
+  const supplier = await db.prepare(`
     SELECT s.*,
       s.opening_balance + s.total_billed               as total_owed,
       s.opening_balance + s.total_billed - s.total_paid as outstanding
@@ -30,7 +30,7 @@ router.get('/:id', adminAuth, (req, res) => {
   `).get(req.params.id)
   if (!supplier) return res.status(404).json({ error: 'Not found' })
 
-  const bills = db.prepare(`
+  const bills = await db.prepare(`
     SELECT b.*,
       COALESCE((SELECT SUM(amount) FROM bill_payments WHERE bill_id = b.id), 0) as amount_paid,
       b.total - COALESCE((SELECT SUM(amount) FROM bill_payments WHERE bill_id = b.id), 0) as outstanding
@@ -49,11 +49,11 @@ router.get('/:id', adminAuth, (req, res) => {
 })
 
 // ── POST create supplier ──────────────────────────────────────
-router.post('/', adminAuth, (req, res) => {
+router.post('/', adminAuth, async (req, res) => {
   const { name, category, contact, email, address, lead_days, opening_balance, notes } = req.body
   if (!name) return res.status(400).json({ error: 'Supplier name required' })
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO suppliers (name, category, contact, email, address, lead_days, opening_balance, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
@@ -67,18 +67,18 @@ router.post('/', adminAuth, (req, res) => {
     notes           || ''
   )
 
-  const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(result.lastInsertRowid)
+  const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(result.lastInsertRowid)
   auditLog({ req, action: 'CREATE', entity: 'supplier', entityId: supplier.id, description: `Added supplier "${name}"`, newValue: supplier })
   res.json(supplier)
 })
 
 // ── PUT update supplier ───────────────────────────────────────
-router.put('/:id', adminAuth, (req, res) => {
+router.put('/:id', adminAuth, async (req, res) => {
   const { name, category, contact, email, address, lead_days, opening_balance, status, notes } = req.body
-  const old = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
+  const old = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE suppliers SET name=?, category=?, contact=?, email=?, address=?, lead_days=?, opening_balance=?, status=?, notes=?
     WHERE id=?
   `).run(
@@ -90,21 +90,21 @@ router.put('/:id', adminAuth, (req, res) => {
     req.params.id
   )
 
-  const updated = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
+  const updated = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
   auditLog({ req, action: 'UPDATE', entity: 'supplier', entityId: req.params.id, description: `Updated supplier "${name}"`, oldValue: old, newValue: updated })
   res.json(updated)
 })
 
 // ── DELETE supplier ───────────────────────────────────────────
-router.delete('/:id', adminAuth, (req, res) => {
-  const old = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
+router.delete('/:id', adminAuth, async (req, res) => {
+  const old = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
 
-  const hasBills = db.prepare('SELECT COUNT(*) as c FROM purchase_bills WHERE supplier_id = ?').get(req.params.id).c
+  const { c: hasBills } = await db.prepare('SELECT COUNT(*) as c FROM purchase_bills WHERE supplier_id = ?').get(req.params.id)
   if (hasBills > 0) return res.status(400).json({ error: 'Cannot delete — supplier has purchase bills' })
 
-  db.prepare('INSERT INTO archive_suppliers (original_id, data_json, deleted_by_email) VALUES (?,?,?)').run(old.id, JSON.stringify(old), req.admin.email)
-  db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id)
+  await db.prepare('INSERT INTO archive_suppliers (original_id, data_json, deleted_by_email) VALUES (?,?,?)').run(old.id, JSON.stringify(old), req.admin.email)
+  await db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id)
   auditLog({ req, action: 'DELETE', entity: 'supplier', entityId: req.params.id, description: `Deleted supplier "${old.name}"`, oldValue: old })
   res.json({ success: true })
 })

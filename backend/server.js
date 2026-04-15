@@ -3,6 +3,7 @@ const express = require('express')
 const cors    = require('cors')
 const path    = require('path')
 const app     = express()
+const db      = require('./db')
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'https://dnaccessories.netlify.app' }))
 app.use(express.json())
@@ -22,16 +23,21 @@ app.use('/api/admin/orders',    require('./routes/adminOrders'))
 app.use('/api/admin/finance',   require('./routes/adminFinance'))
 app.use('/api/admin/theme',     require('./routes/adminTheme'))
 app.use('/api/admin/system',    require('./routes/adminSystem'))
-app.use('/api/admin/customers', require('./routes/adminCustomers'))
-
-// ── V12 new routes ────────────────────────────────────────────
 app.use('/api/admin/materials', require('./routes/adminMaterials'))
 app.use('/api/admin/bills',     require('./routes/adminBills'))
-app.use('/api/admin/recipes', require('./routes/adminRecipes'))
+app.use('/api/admin/recipes',   require('./routes/adminRecipes'))
 app.use('/api/admin/suppliers', require('./routes/adminSuppliers'))
+app.use('/api/admin/customers', require('./routes/adminCustomers'))
 
 // ── Health ────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', version: 'v12' }))
+app.get('/api/health', (req, res) => res.json({ status: 'ok', version: 'v13-turso' }))
 
 const PORT = process.env.PORT || 3001
-app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`))
+
+// Init DB first, then start server
+db.init().then(() => {
+  app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`))
+}).catch(err => {
+  console.error('DB init failed:', err)
+  process.exit(1)
+})

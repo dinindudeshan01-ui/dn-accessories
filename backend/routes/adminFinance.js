@@ -6,30 +6,30 @@ const { auditLog } = require('../middleware/auditLog')
 
 // ── EXPENSES ──────────────────────────────────────────────────
 
-router.get('/expenses', adminAuth, (req, res) => {
+router.get('/expenses', adminAuth, async (req, res) => {
   const { month } = req.query
   const expenses = month
-    ? db.prepare("SELECT * FROM expenses WHERE strftime('%Y-%m', date) = ? ORDER BY date DESC").all(month)
-    : db.prepare('SELECT * FROM expenses ORDER BY date DESC LIMIT 200').all()
+    ? await db.prepare("SELECT * FROM expenses WHERE strftime('%Y-%m', date) = ? ORDER BY date DESC").all(month)
+    : await db.prepare('SELECT * FROM expenses ORDER BY date DESC LIMIT 200').all()
   res.json(expenses)
 })
 
-router.post('/expenses', adminAuth, (req, res) => {
+router.post('/expenses', adminAuth, async (req, res) => {
   const { description, category, amount, date } = req.body
   if (!description || !amount) return res.status(400).json({ error: 'Missing fields' })
-  const result = db.prepare(
+  const result = await db.prepare(
     'INSERT INTO expenses (description, category, amount, date) VALUES (?,?,?,?)'
   ).run(description, category || 'Other', parseFloat(amount), date || new Date().toISOString().split('T')[0])
-  const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid)
+  const expense = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid)
   auditLog({ req, action: 'CREATE', entity: 'expense', entityId: expense.id, description: `Added expense "${description}" Rs ${amount}`, newValue: expense })
   res.json(expense)
 })
 
-router.delete('/expenses/:id', adminAuth, (req, res) => {
-  const old = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
+router.delete('/expenses/:id', adminAuth, async (req, res) => {
+  const old = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
-  db.prepare('INSERT INTO archive_expenses (original_id, data_json, deleted_by_email) VALUES (?,?,?)').run(old.id, JSON.stringify(old), req.admin.email)
-  db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id)
+  await db.prepare('INSERT INTO archive_expenses (original_id, data_json, deleted_by_email) VALUES (?,?,?)').run(old.id, JSON.stringify(old), req.admin.email)
+  await db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id)
   auditLog({ req, action: 'DELETE', entity: 'expense', entityId: req.params.id, description: `Deleted expense "${old.description}" Rs ${old.amount}`, oldValue: old })
   res.json({ success: true })
 })
@@ -42,7 +42,7 @@ router.delete('/expenses/:id', adminAuth, (req, res) => {
 //
 // Purchase bills are Accounts Payable — separate from COGS entirely
 
-router.get('/pl', adminAuth, (req, res) => {
+router.get('/pl', adminAuth, async (req, res) => {
   try {
     const { month } = req.query
 
@@ -59,19 +59,18 @@ router.get('/pl', adminAuth, (req, res) => {
       : 'WHERE 1=1'
 
     // ── Revenue — confirmed sales only ────────────────────────
-    const revenue = month
-      ? db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get(month).total
-      : db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get().total
+    const { total: revenue } = month
+      ? await db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get(month)
+      : await db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get()
 
     // ── COGS — materials actually used in sold products ────────
-    // This is the ONLY correct source for COGS under accrual
-    const cogs = month
-      ? db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get(month).total
-      : db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get().total
+    const { total: cogs } = month
+      ? await db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get(month)
+      : await db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get()
 
-    // ── COGS breakdown by product (for drill-down) ────────────
+    // ── COGS breakdown by product ─────────────────────────────
     const cogsByProduct = month
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT
             product_name,
             SUM(qty_sold)   as total_qty,
@@ -82,7 +81,7 @@ router.get('/pl', adminAuth, (req, res) => {
           GROUP BY product_name
           ORDER BY total_cost DESC
         `).all(month)
-      : db.prepare(`
+      : await db.prepare(`
           SELECT
             product_name,
             SUM(qty_sold)   as total_qty,
@@ -94,9 +93,9 @@ router.get('/pl', adminAuth, (req, res) => {
           ORDER BY total_cost DESC
         `).all()
 
-    // ── COGS breakdown by material (for drill-down) ───────────
+    // ── COGS breakdown by material ────────────────────────────
     const cogsByMaterial = month
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT
             material_name,
             unit,
@@ -108,7 +107,7 @@ router.get('/pl', adminAuth, (req, res) => {
           GROUP BY material_name
           ORDER BY total_cost DESC
         `).all(month)
-      : db.prepare(`
+      : await db.prepare(`
           SELECT
             material_name,
             unit,
@@ -123,13 +122,13 @@ router.get('/pl', adminAuth, (req, res) => {
 
     // ── Products with no recipe (COGS unknown) ────────────────
     const noRecipe = month
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT product_name, SUM(qty_sold) as total_qty
           FROM order_cogs ${cogsFilter}
           AND material_name = 'No recipe'
           GROUP BY product_name
         `).all(month)
-      : db.prepare(`
+      : await db.prepare(`
           SELECT product_name, SUM(qty_sold) as total_qty
           FROM order_cogs ${cogsFilter}
           AND material_name = 'No recipe'
@@ -138,12 +137,12 @@ router.get('/pl', adminAuth, (req, res) => {
 
     // ── Operating expenses ────────────────────────────────────
     const expenseRows = month
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT category, COALESCE(SUM(amount), 0) as total
           FROM expenses ${expFilter}
           GROUP BY category
         `).all(month)
-      : db.prepare(`
+      : await db.prepare(`
           SELECT category, COALESCE(SUM(amount), 0) as total
           FROM expenses ${expFilter}
           GROUP BY category
@@ -152,11 +151,8 @@ router.get('/pl', adminAuth, (req, res) => {
     const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
 
     // ── Purchase bills for reference (NOT part of P&L COGS) ───
-    // Shown separately so she can see what she's owed to suppliers
-    // FIX: replaced correlated subquery inside SUM() with a LEFT JOIN
-    // to avoid SQLite runtime error crashing the entire /pl endpoint
     const billsThisPeriod = month
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT
             COALESCE(SUM(b.total), 0) as total,
             COALESCE(SUM(b.total) - SUM(COALESCE(bp.paid, 0)), 0) as outstanding
@@ -171,20 +167,15 @@ router.get('/pl', adminAuth, (req, res) => {
       : null
 
     res.json({
-      // Core P&L
       revenue,
       cogs,
       grossProfit:    revenue - cogs,
       totalExpenses,
       netProfit:      revenue - cogs - totalExpenses,
       expenses:       expenseRows,
-
-      // COGS drill-down
       cogsByProduct,
       cogsByMaterial,
       noRecipe,
-
-      // Reference info (not P&L)
       billsThisPeriod,
     })
 
@@ -194,9 +185,9 @@ router.get('/pl', adminAuth, (req, res) => {
   }
 })
 
-// ── COGS detail for a specific order (for order drill-down) ───
-router.get('/cogs/order/:orderId', adminAuth, (req, res) => {
-  const entries = db.prepare(`
+// ── COGS detail for a specific order ─────────────────────────
+router.get('/cogs/order/:orderId', adminAuth, async (req, res) => {
+  const entries = await db.prepare(`
     SELECT * FROM order_cogs WHERE order_id = ? ORDER BY product_name, material_name
   `).all(req.params.orderId)
 
@@ -205,8 +196,8 @@ router.get('/cogs/order/:orderId', adminAuth, (req, res) => {
 })
 
 // ── Suppliers (legacy route kept for compatibility) ────────────
-router.get('/suppliers', adminAuth, (req, res) => {
-  res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all())
+router.get('/suppliers', adminAuth, async (req, res) => {
+  res.json(await db.prepare('SELECT * FROM suppliers ORDER BY name').all())
 })
 
 module.exports = router
