@@ -22,6 +22,7 @@ app.use('/api/admin/orders',    require('./routes/adminOrders'))
 app.use('/api/admin/finance',   require('./routes/adminFinance'))
 app.use('/api/admin/theme',     require('./routes/adminTheme'))
 app.use('/api/admin/system',    require('./routes/adminSystem'))
+app.use('/api/admin/customers', require('./routes/adminCustomers'))
 
 // ── V12 new routes ────────────────────────────────────────────
 app.use('/api/admin/materials', require('./routes/adminMaterials'))
