@@ -39,41 +39,36 @@ router.get('/:productId', adminAuth, async (req, res) => {
 })
 
 // ── PUT save full recipe for a product ───────────────────────
-// Body: { materials: [{ material_id, qty_needed }] }
 router.put('/:productId', adminAuth, async (req, res) => {
   const { materials } = req.body
   const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.productId)
   if (!product) return res.status(404).json({ error: 'Product not found' })
 
-  const totalCost = await db.transaction(async () => {
-    // Clear existing recipe
-    await db.prepare('DELETE FROM product_materials WHERE product_id = ?').run(req.params.productId)
+  // Clear existing recipe
+  await db.prepare('DELETE FROM product_materials WHERE product_id = ?').run(req.params.productId)
 
-    // Insert new lines
-    for (const m of materials) {
-      if (m.material_id && m.qty_needed > 0) {
-        await db.prepare('INSERT INTO product_materials (product_id, material_id, qty_needed) VALUES (?,?,?)').run(
-          req.params.productId, m.material_id, parseFloat(m.qty_needed)
-        )
-      }
+  // Insert new lines
+  for (const m of materials) {
+    if (m.material_id && m.qty_needed > 0) {
+      await db.prepare('INSERT INTO product_materials (product_id, material_id, qty_needed) VALUES (?,?,?)').run(
+        req.params.productId, m.material_id, parseFloat(m.qty_needed)
+      )
     }
+  }
 
-    // Recalculate and update cost_price
-    const row = await db.prepare(`
-      SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
-      FROM product_materials pm
-      JOIN materials m ON pm.material_id = m.id
-      WHERE pm.product_id = ?
-    `).get(req.params.productId)
+  // Recalculate and update cost_price
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
+    FROM product_materials pm
+    JOIN materials m ON pm.material_id = m.id
+    WHERE pm.product_id = ?
+  `).get(req.params.productId)
 
-    const total = Number(row?.total ?? 0)
+  const totalCost = Number(row?.total ?? 0)
 
-    await db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(total, req.params.productId)
+  await db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(totalCost, req.params.productId)
 
-    return total
-  })
-
-  auditLog({ req, action: 'UPDATE', entity: 'recipe', entityId: req.params.productId, description: `Updated recipe for "${product.name}" — cost: ${Number(totalCost).toFixed(2)}` })
+  auditLog({ req, action: 'UPDATE', entity: 'recipe', entityId: req.params.productId, description: `Updated recipe for "${product.name}" — cost: ${totalCost.toFixed(2)}` })
   res.json({ success: true, totalCost })
 })
 
