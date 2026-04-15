@@ -33,7 +33,7 @@ router.get('/:productId', adminAuth, async (req, res) => {
     ORDER BY m.name
   `).all(req.params.productId)
 
-  const totalCost = materials.reduce((s, m) => s + m.line_cost, 0)
+  const totalCost = materials.reduce((s, m) => s + Number(m.line_cost ?? 0), 0)
 
   res.json({ product, materials, totalCost })
 })
@@ -59,12 +59,14 @@ router.put('/:productId', adminAuth, async (req, res) => {
     }
 
     // Recalculate and update cost_price
-    const { total } = await db.prepare(`
+    const row = await db.prepare(`
       SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
       FROM product_materials pm
       JOIN materials m ON pm.material_id = m.id
       WHERE pm.product_id = ?
     `).get(req.params.productId)
+
+    const total = Number(row?.total ?? 0)
 
     await db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(total, req.params.productId)
 
