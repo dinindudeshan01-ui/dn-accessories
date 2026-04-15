@@ -73,7 +73,7 @@ router.put('/:productId', adminAuth, async (req, res) => {
     return total
   })
 
-  auditLog({ req, action: 'UPDATE', entity: 'recipe', entityId: req.params.productId, description: `Updated recipe for "${product.name}" — cost: ${totalCost.toFixed(2)}` })
+  auditLog({ req, action: 'UPDATE', entity: 'recipe', entityId: req.params.productId, description: `Updated recipe for "${product.name}" — cost: ${Number(totalCost).toFixed(2)}` })
   res.json({ success: true, totalCost })
 })
 
