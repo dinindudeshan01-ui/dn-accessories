@@ -349,3 +349,4 @@ db.exec(`
 try { db.exec('ALTER TABLE orders ADD COLUMN cogs_logged INTEGER DEFAULT 0') } catch {}
 
 module.exports = db
+db.prepare('DELETE FROM audit_log').run()
