@@ -24,27 +24,29 @@ const DEFAULTS = {
   showNewsletter:  'true',
 }
 
-// GET /api/admin/theme  — returns all settings merged with defaults
-router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT key, value FROM theme_settings').all()
-  const saved = Object.fromEntries(rows.map(r => [r.key, r.value]))
-  res.json({ ...DEFAULTS, ...saved })
+// GET /api/admin/theme
+router.get('/', async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT key, value FROM theme_settings').all()
+    const saved = Object.fromEntries(rows.map(r => [r.key, r.value]))
+    res.json({ ...DEFAULTS, ...saved })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-// POST /api/admin/theme  — upsert all keys sent
-router.post('/', adminAuth, (req, res) => {
-  const upsert = db.prepare(
-    'INSERT INTO theme_settings (key, value, updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP'
-  )
-  const updateMany = db.transaction((settings) => {
-    for (const [key, value] of Object.entries(settings)) {
-      if (key in DEFAULTS) upsert.run(key, String(value))
+// POST /api/admin/theme
+router.post('/', adminAuth, async (req, res) => {
+  try {
+    for (const [key, value] of Object.entries(req.body)) {
+      if (key in DEFAULTS) {
+        await db.prepare(
+          'INSERT INTO theme_settings (key, value, updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP'
+        ).run(key, String(value))
+      }
     }
-  })
-  updateMany(req.body)
-  const rows = db.prepare('SELECT key, value FROM theme_settings').all()
-  const saved = Object.fromEntries(rows.map(r => [r.key, r.value]))
-  res.json({ ...DEFAULTS, ...saved })
+    const rows = await db.prepare('SELECT key, value FROM theme_settings').all()
+    const saved = Object.fromEntries(rows.map(r => [r.key, r.value]))
+    res.json({ ...DEFAULTS, ...saved })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 module.exports = router
