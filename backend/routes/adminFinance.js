@@ -59,14 +59,16 @@ router.get('/pl', adminAuth, async (req, res) => {
       : 'WHERE 1=1'
 
     // ── Revenue — confirmed sales only ────────────────────────
-    const { total: revenue } = month
+    const revRow = month
       ? await db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get(month)
       : await db.prepare(`SELECT COALESCE(SUM(total), 0) as total FROM orders ${revFilter}`).get()
+    const revenue = Number(revRow?.total ?? 0)
 
     // ── COGS — materials actually used in sold products ────────
-    const { total: cogs } = month
+    const cogsRow = month
       ? await db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get(month)
       : await db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get()
+    const cogs = Number(cogsRow?.total ?? 0)
 
     // ── COGS breakdown by product ─────────────────────────────
     const cogsByProduct = month
@@ -148,7 +150,7 @@ router.get('/pl', adminAuth, async (req, res) => {
           GROUP BY category
         `).all()
 
-    const totalExpenses = expenseRows.reduce((s, r) => s + r.total, 0)
+    const totalExpenses = expenseRows.reduce((s, r) => s + Number(r.total ?? 0), 0)
 
     // ── Purchase bills for reference (NOT part of P&L COGS) ───
     const billsThisPeriod = month
