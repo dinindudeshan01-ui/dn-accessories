@@ -163,7 +163,7 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
     const bill_image = req.file ? req.file.filename : null
     const resolvedDate = bill_date || new Date().toISOString().split('T')[0]
 
-    const billId = await db.transaction(async () => {
+    const _tx = async () => {
       const billResult = await db.prepare(`
         INSERT INTO purchase_bills (bill_number, supplier_id, bill_date, due_date, notes, bill_image, subtotal, total, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unpaid')
@@ -207,7 +207,8 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
       }
 
       return newBillId
-    })
+    }
+    const billId = await _tx()
 
     const created = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(Number(billId))
 
@@ -234,7 +235,7 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
   const payAmount = parseFloat(amount)
   if (!payAmount || payAmount <= 0) return res.status(400).json({ error: 'Invalid amount' })
 
-  await db.transaction(async () => {
+  await (async () => {
     await db.prepare(`
       INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -273,7 +274,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
   if (!bill) return res.status(404).json({ error: 'Not found' })
   if (bill.status !== 'unpaid') return res.status(400).json({ error: 'Cannot delete a paid or partial bill' })
 
-  await db.transaction(async () => {
+  await (async () => {
     const items = await db.prepare('SELECT * FROM purchase_bill_items WHERE bill_id = ?').all(bill.id)
 
     for (const item of items) {
