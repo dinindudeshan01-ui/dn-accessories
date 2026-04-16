@@ -36,7 +36,7 @@ export default function AdminExpenses() {
 
   async function deleteExpense(id) {
     if (!confirm('Delete this expense?')) return
-    await adminApi.delete(`/finance/expenses/Rs {id}`); await load()
+    await adminApi.delete(`/finance/expenses/${id}`); await load()
   }
 
   const total  = expenses.reduce((s,e) => s + e.amount, 0)
@@ -73,7 +73,7 @@ export default function AdminExpenses() {
         </Card>
 
         <Card>
-          <CardHeader title={`Rs {expenses.length} expenses — Total: LKR Rs {total.toLocaleString()}`} />
+          <CardHeader title={`${expenses.length} expenses — Total: LKR ${total.toLocaleString()}`} />
           {loading ? <Spinner /> : (
             <Table headers={['Date','Description','Category','Amount','']}>
               {expenses.length === 0

@@ -219,7 +219,7 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
       })
     }
 
-    await client.batch(batchStatements, 'write')
+    await db.batch(batchStatements, 'write')
 
     // Recalc avg costs + product costs (sequential per material, unavoidable)
     for (const item of items) {
@@ -255,7 +255,7 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
   const resolvedDate = payment_date || new Date().toISOString().split('T')[0]
 
   // Insert payment, then read running total, then update status — batched
-  await client.batch([
+  await db.batch([
     {
       sql:  'INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes) VALUES (?, ?, ?, ?, ?, ?)',
       args: [req.params.id, payAmount, resolvedDate, payment_method || 'bank', bank_account || null, notes || ''],
@@ -302,7 +302,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
     batchStatements.push({ sql: 'UPDATE suppliers SET total_billed = total_billed - ? WHERE id = ?', args: [bill.total, bill.supplier_id] })
   }
 
-  await client.batch(batchStatements, 'write')
+  await db.batch(batchStatements, 'write')
 
   // Recalc avg costs + product costs after stock reversal
   for (const item of items) {
