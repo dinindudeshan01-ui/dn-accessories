@@ -9,37 +9,57 @@ const COGS_TRIGGER_STATUSES = ['paid', 'shipped']
 
 // ── Helper: log COGS for an order ─────────────────────────────
 async function logOrderCogs(order) {
-  const items = JSON.parse(order.items_json || '[]')
+  const items    = JSON.parse(order.items_json || '[]')
   const saleDate = new Date(order.created_at).toISOString().split('T')[0]
-  let totalCogs = 0
+  let totalCogs  = 0
 
-  for (const item of items) {
-    const qty = parseFloat(item.qty || item.quantity || 1)
+  // Fetch all products in parallel
+  const products = await Promise.all(
+    items.map(item =>
+      item.id
+        ? db.prepare('SELECT * FROM products WHERE id = ?').get(item.id)
+        : db.prepare('SELECT * FROM products WHERE name = ?').get(item.name)
+    )
+  )
 
-    const product = item.id
-      ? await db.prepare('SELECT * FROM products WHERE id = ?').get(item.id)
-      : await db.prepare('SELECT * FROM products WHERE name = ?').get(item.name)
+  // Fetch all recipes in parallel (only for found products)
+  const recipes = await Promise.all(
+    products.map(product =>
+      product
+        ? db.prepare(`
+            SELECT pm.*, m.name as material_name, m.unit, m.avg_cost
+            FROM product_materials pm
+            JOIN materials m ON pm.material_id = m.id
+            WHERE pm.product_id = ?
+          `).all(product.id)
+        : Promise.resolve([])
+    )
+  )
+
+  // Build all inserts + stock updates into one batch
+  const batchStatements = []
+
+  for (let i = 0; i < items.length; i++) {
+    const item    = items[i]
+    const qty     = parseFloat(item.qty || item.quantity || 1)
+    const product = products[i]
+    const recipe  = recipes[i]
 
     if (!product) {
-      await db.prepare(`
-        INSERT INTO order_cogs (order_id, product_name, qty_sold, material_name, qty_used, unit_cost, line_cost, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(order.id, item.name, qty, 'No recipe', 0, 0, 0, saleDate)
+      batchStatements.push({
+        sql:  `INSERT INTO order_cogs (order_id, product_name, qty_sold, material_name, qty_used, unit_cost, line_cost, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [order.id, item.name, qty, 'No recipe', 0, 0, 0, saleDate],
+      })
       continue
     }
 
-    const recipe = await db.prepare(`
-      SELECT pm.*, m.name as material_name, m.unit, m.avg_cost
-      FROM product_materials pm
-      JOIN materials m ON pm.material_id = m.id
-      WHERE pm.product_id = ?
-    `).all(product.id)
-
     if (!recipe.length) {
-      await db.prepare(`
-        INSERT INTO order_cogs (order_id, product_id, product_name, qty_sold, material_name, qty_used, unit_cost, line_cost, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(order.id, product.id, product.name, qty, 'No recipe', 0, 0, 0, saleDate)
+      batchStatements.push({
+        sql:  `INSERT INTO order_cogs (order_id, product_id, product_name, qty_sold, material_name, qty_used, unit_cost, line_cost, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [order.id, product.id, product.name, qty, 'No recipe', 0, 0, 0, saleDate],
+      })
       continue
     }
 
@@ -47,35 +67,59 @@ async function logOrderCogs(order) {
       const qtyUsed  = mat.qty_needed * qty
       const unitCost = mat.avg_cost
       const lineCost = qtyUsed * unitCost
-
-      await db.prepare(`
-        INSERT INTO order_cogs
-          (order_id, product_id, product_name, qty_sold, material_id, material_name, unit, qty_used, unit_cost, line_cost, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(order.id, product.id, product.name, qty, mat.material_id, mat.material_name, mat.unit, qtyUsed, unitCost, lineCost, saleDate)
-
-      await db.prepare('UPDATE materials SET qty_in_stock = MAX(0, qty_in_stock - ?) WHERE id = ?').run(qtyUsed, mat.material_id)
       totalCogs += lineCost
+
+      batchStatements.push({
+        sql:  `INSERT INTO order_cogs
+                 (order_id, product_id, product_name, qty_sold, material_id, material_name, unit, qty_used, unit_cost, line_cost, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [order.id, product.id, product.name, qty, mat.material_id, mat.material_name, mat.unit, qtyUsed, unitCost, lineCost, saleDate],
+      })
+
+      batchStatements.push({
+        sql:  'UPDATE materials SET qty_in_stock = MAX(0, qty_in_stock - ?) WHERE id = ?',
+        args: [qtyUsed, mat.material_id],
+      })
     }
 
-    await db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(qty, product.id)
+    batchStatements.push({
+      sql:  'UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?',
+      args: [qty, product.id],
+    })
   }
 
-  await db.prepare('UPDATE orders SET cogs_logged = 1 WHERE id = ?').run(order.id)
+  // Mark order as logged
+  batchStatements.push({
+    sql:  'UPDATE orders SET cogs_logged = 1 WHERE id = ?',
+    args: [order.id],
+  })
+
+  if (batchStatements.length) {
+    await client.batch(batchStatements, 'write')
+  }
+
   return totalCogs
 }
 
 // ── Helper: reverse COGS ──────────────────────────────────────
 async function reverseOrderCogs(order) {
   const entries = await db.prepare('SELECT * FROM order_cogs WHERE order_id = ?').all(order.id)
+
+  const batchStatements = []
+
   for (const entry of entries) {
     if (entry.material_id && entry.qty_used > 0)
-      await db.prepare('UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?').run(entry.qty_used, entry.material_id)
+      batchStatements.push({ sql: 'UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?', args: [entry.qty_used, entry.material_id] })
     if (entry.product_id && entry.qty_sold > 0)
-      await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(entry.qty_sold, entry.product_id)
+      batchStatements.push({ sql: 'UPDATE products SET stock = stock + ? WHERE id = ?', args: [entry.qty_sold, entry.product_id] })
   }
-  await db.prepare('DELETE FROM order_cogs WHERE order_id = ?').run(order.id)
-  await db.prepare('UPDATE orders SET cogs_logged = 0 WHERE id = ?').run(order.id)
+
+  batchStatements.push({ sql: 'DELETE FROM order_cogs WHERE order_id = ?',      args: [order.id] })
+  batchStatements.push({ sql: 'UPDATE orders SET cogs_logged = 0 WHERE id = ?', args: [order.id] })
+
+  if (batchStatements.length) {
+    await client.batch(batchStatements, 'write')
+  }
 }
 
 // ── GET all orders ────────────────────────────────────────────
@@ -96,18 +140,20 @@ router.get('/', adminAuth, async (req, res) => {
 // ── GET stats ─────────────────────────────────────────────────
 router.get('/stats', adminAuth, async (req, res) => {
   try {
-    const total    = await db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as revenue FROM orders WHERE status IN ('paid','shipped')`).get()
-    const byStatus = await db.prepare('SELECT status, COUNT(*) as count FROM orders GROUP BY status').all()
-    const monthly  = await db.prepare(`
-      SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as orders, SUM(total) as revenue
-      FROM orders WHERE status IN ('paid','shipped')
-      GROUP BY month ORDER BY month DESC LIMIT 12
-    `).all()
-    const daily7 = await db.prepare(`
-      SELECT date(created_at) as day, COUNT(*) as orders, SUM(total) as revenue
-      FROM orders WHERE status IN ('paid','shipped') AND created_at >= date('now', '-7 days')
-      GROUP BY day ORDER BY day ASC
-    `).all()
+    const [total, byStatus, monthly, daily7] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as revenue FROM orders WHERE status IN ('paid','shipped')`).get(),
+      db.prepare('SELECT status, COUNT(*) as count FROM orders GROUP BY status').all(),
+      db.prepare(`
+        SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as orders, SUM(total) as revenue
+        FROM orders WHERE status IN ('paid','shipped')
+        GROUP BY month ORDER BY month DESC LIMIT 12
+      `).all(),
+      db.prepare(`
+        SELECT date(created_at) as day, COUNT(*) as orders, SUM(total) as revenue
+        FROM orders WHERE status IN ('paid','shipped') AND created_at >= date('now', '-7 days')
+        GROUP BY day ORDER BY day ASC
+      `).all(),
+    ])
     res.json({ total, byStatus, monthly, daily7 })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
