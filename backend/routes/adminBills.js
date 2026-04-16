@@ -171,7 +171,7 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
         subtotal,
         total
       )
-      const newBillId = billResult.lastInsertRowid
+      const newBillId = Number(billResult.lastInsertRowid)
 
       for (const item of items) {
         const qty       = parseFloat(item.qty)
@@ -203,7 +203,7 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
       return newBillId
     })
 
-    const created = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
+    const created = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(Number(billId))
 
     auditLog({
       req, action: 'CREATE', entity: 'bill', entityId: billId,
