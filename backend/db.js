@@ -53,7 +53,7 @@ function transaction(fn) {
 function pragma() {}
 
 // ── Schema ───────────────────────────────────────────────────
-const TABLES = [
+const TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, price REAL NOT NULL,
     description TEXT, image_url TEXT, category TEXT, subcategory TEXT DEFAULT '',
@@ -149,21 +149,41 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS archive_cogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, original_id INTEGER, data_json TEXT NOT NULL,
     deleted_by_email TEXT, deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP, reset_batch TEXT)`,
+  // ── Indexes on hot columns ────────────────────────────────
+  `CREATE INDEX IF NOT EXISTS idx_orders_status      ON orders (status)`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_created_at  ON orders (created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_date       ON expenses (date)`,
+  `CREATE INDEX IF NOT EXISTS idx_order_cogs_order_id ON order_cogs (order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_bill_payments_bill  ON bill_payments (bill_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_prod_mat_product    ON product_materials (product_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_prod_mat_material   ON product_materials (material_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_bill_items_bill     ON purchase_bill_items (bill_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_cost_history_mat    ON material_cost_history (material_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_purchase_bills_sup  ON purchase_bills (supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_log_created   ON audit_log (created_at)`,
 ]
 
 const DEFAULT_UNITS = ['piece','pair','set','gram','kg','meter','cm','ml','liter','roll','sheet','pack','box','dozen']
 
 async function init() {
-  for (const sql of TABLES) {
-    await client.execute(sql)
-  }
-  // Seed units
-  for (const u of DEFAULT_UNITS) {
-    await client.execute({ sql: 'INSERT OR IGNORE INTO units (name) VALUES (?)', args: [u] })
-  }
+  // Batch 1: all tables + indexes (single round-trip)
+  await client.batch(
+    TABLE_STATEMENTS.map(sql => ({ sql })),
+    'write'
+  )
+
+  // Batch 2: seed units (single round-trip)
+  await client.batch(
+    DEFAULT_UNITS.map(u => ({
+      sql:  'INSERT OR IGNORE INTO units (name) VALUES (?)',
+      args: [u],
+    })),
+    'write'
+  )
+
   console.log('✅ Turso DB ready')
 }
 
-const db = { prepare, exec, transaction, pragma, init }
+const db = { prepare, exec, transaction, pragma, init, batch: (...args) => client.batch(...args) }
 
 module.exports = db
