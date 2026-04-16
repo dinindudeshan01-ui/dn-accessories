@@ -55,14 +55,14 @@ async function recalcProductCosts(materialId) {
   `).all(materialId)
 
   for (const { product_id } of affectedProducts) {
-    const { total } = await db.prepare(`
+    const costRow = await db.prepare(`
       SELECT COALESCE(SUM(pm.qty_needed * m.avg_cost), 0) as total
       FROM product_materials pm
       JOIN materials m ON pm.material_id = m.id
       WHERE pm.product_id = ?
     `).get(product_id)
 
-    await db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(total, product_id)
+    await db.prepare('UPDATE products SET cost_price = ? WHERE id = ?').run(Number(costRow?.total ?? 0), product_id)
   }
 }
 
@@ -240,8 +240,8 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
       notes           || ''
     )
 
-    const { s: totalPaid } = await db.prepare('SELECT SUM(amount) as s FROM bill_payments WHERE bill_id = ?').get(req.params.id)
-    const paid = totalPaid || 0
+    const payRow = await db.prepare('SELECT SUM(amount) as total FROM bill_payments WHERE bill_id = ?').get(req.params.id)
+    const paid = Number(payRow?.total ?? 0)
     let status = 'unpaid'
     if (paid >= bill.total)  status = 'paid'
     else if (paid > 0)       status = 'partial'
