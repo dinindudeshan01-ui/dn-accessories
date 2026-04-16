@@ -101,8 +101,11 @@ router.get('/', adminAuth, async (req, res) => {
   const bills = await db.prepare(sql).all(...params)
   res.json(bills.map(b => ({
     ...b,
+    total:       Number(b.total ?? 0),
+    subtotal:    Number(b.subtotal ?? 0),
+    amount_paid: Number(b.amount_paid ?? 0),
     bill_image_url: b.bill_image ? `${BASE_URL}/uploads/bills/${b.bill_image}` : null,
-    outstanding: b.total - b.amount_paid,
+    outstanding: Number(b.total ?? 0) - Number(b.amount_paid ?? 0),
   })))
 })
 
@@ -131,7 +134,10 @@ router.get('/:id', adminAuth, async (req, res) => {
   res.json({
     ...bill,
     bill_image_url: bill.bill_image ? `${BASE_URL}/uploads/bills/${bill.bill_image}` : null,
-    outstanding: bill.total - bill.amount_paid,
+    total:       Number(bill.total ?? 0),
+    subtotal:    Number(bill.subtotal ?? 0),
+    amount_paid: Number(bill.amount_paid ?? 0),
+    outstanding: Number(bill.total ?? 0) - Number(bill.amount_paid ?? 0),
     items,
     payments,
   })
