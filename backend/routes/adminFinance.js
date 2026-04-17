@@ -25,6 +25,52 @@ router.post('/expenses', adminAuth, async (req, res) => {
   res.json(expense)
 })
 
+// ── PUT edit expense ──────────────────────────────────────────
+router.put('/expenses/:id', adminAuth, async (req, res) => {
+  try {
+    const old = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
+    if (!old) return res.status(404).json({ error: 'Not found' })
+
+    const { description, category, amount, date } = req.body
+
+    // Build a diff for the audit log
+    const changes = {}
+    if (description !== undefined && description !== old.description)       changes.description = { from: old.description, to: description }
+    if (category    !== undefined && category    !== old.category)          changes.category    = { from: old.category,    to: category }
+    if (amount      !== undefined && parseFloat(amount) !== old.amount)     changes.amount      = { from: old.amount,      to: parseFloat(amount) }
+    if (date        !== undefined && date        !== old.date)              changes.date        = { from: old.date,        to: date }
+
+    await db.prepare(`
+      UPDATE expenses
+      SET description = ?,
+          category    = ?,
+          amount      = ?,
+          date        = ?
+      WHERE id = ?
+    `).run(
+      description !== undefined ? description : old.description,
+      category    !== undefined ? category    : old.category,
+      amount      !== undefined ? parseFloat(amount) : old.amount,
+      date        !== undefined ? date        : old.date,
+      req.params.id
+    )
+
+    const updated = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
+
+    auditLog({
+      req, action: 'UPDATE', entity: 'expense', entityId: req.params.id,
+      description: `Edited expense "${updated.description}" — changed: ${Object.keys(changes).join(', ') || 'nothing'}`,
+      oldValue: old,
+      newValue: updated,
+    })
+
+    res.json({ ...updated, changes })
+  } catch (err) {
+    console.error('Expense edit error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.delete('/expenses/:id', adminAuth, async (req, res) => {
   const old = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
@@ -162,6 +208,7 @@ router.get('/pl', adminAuth, async (req, res) => {
           LEFT JOIN (
             SELECT bill_id, SUM(amount) as paid
             FROM bill_payments
+            WHERE voided = 0
             GROUP BY bill_id
           ) bp ON bp.bill_id = b.id
           WHERE strftime('%Y-%m', b.bill_date) = ?

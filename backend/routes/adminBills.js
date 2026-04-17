@@ -46,7 +46,6 @@ async function recalcAvgCost(materialId) {
 }
 
 // ── Helper: recalc cost_price for all handmade products using a material ──
-// Single SQL update — no loop
 async function recalcProductCosts(materialId) {
   await db.prepare(`
     UPDATE products
@@ -83,7 +82,6 @@ async function generateBillNumber() {
 }
 
 // ── GET all bills ─────────────────────────────────────────────
-// Single JOIN replaces correlated subquery per row
 router.get('/', adminAuth, async (req, res) => {
   const { supplier_id, status } = req.query
   let sql = `
@@ -94,6 +92,7 @@ router.get('/', adminAuth, async (req, res) => {
     LEFT JOIN (
       SELECT bill_id, SUM(amount) as amount_paid
       FROM bill_payments
+      WHERE voided = 0
       GROUP BY bill_id
     ) p ON p.bill_id = b.id
     WHERE 1=1
@@ -116,7 +115,6 @@ router.get('/', adminAuth, async (req, res) => {
 
 // ── GET single bill with items ────────────────────────────────
 router.get('/:id', adminAuth, async (req, res) => {
-  // Fetch bill + items + payments in parallel
   const [bill, items, payments] = await Promise.all([
     db.prepare(`
       SELECT b.*, s.name as supplier_name,
@@ -124,7 +122,7 @@ router.get('/:id', adminAuth, async (req, res) => {
       FROM purchase_bills b
       LEFT JOIN suppliers s ON b.supplier_id = s.id
       LEFT JOIN (
-        SELECT bill_id, SUM(amount) as amount_paid FROM bill_payments GROUP BY bill_id
+        SELECT bill_id, SUM(amount) as amount_paid FROM bill_payments WHERE voided = 0 GROUP BY bill_id
       ) p ON p.bill_id = b.id
       WHERE b.id = ?
     `).get(req.params.id),
@@ -162,7 +160,6 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
 
     if (!items.length) return res.status(400).json({ error: 'At least one item required' })
 
-    // Validate all materials in parallel
     const matChecks = await Promise.all(
       items.map(item => db.prepare('SELECT id FROM materials WHERE id = ?').get(item.material_id))
     )
@@ -176,7 +173,6 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
     const bill_image   = req.file ? req.file.filename : null
     const resolvedDate = bill_date || new Date().toISOString().split('T')[0]
 
-    // Insert bill header
     const billResult = await db.prepare(`
       INSERT INTO purchase_bills (bill_number, supplier_id, bill_date, due_date, notes, bill_image, subtotal, total, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unpaid')
@@ -192,36 +188,22 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
     )
     const newBillId = Number(billResult.lastInsertRowid)
 
-    // Build batch: bill items + cost history + stock updates
     const batchStatements = []
     for (const item of items) {
       const qty       = parseFloat(item.qty)
       const unitCost  = parseFloat(item.unit_cost)
       const lineTotal = qty * unitCost
 
-      batchStatements.push({
-        sql:  'INSERT INTO purchase_bill_items (bill_id, material_id, qty, unit_cost, total) VALUES (?, ?, ?, ?, ?)',
-        args: [newBillId, item.material_id, qty, unitCost, lineTotal],
-      })
-      batchStatements.push({
-        sql:  'INSERT INTO material_cost_history (material_id, source, source_id, qty, unit_cost, total, date) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        args: [item.material_id, 'bill', newBillId, qty, unitCost, lineTotal, resolvedDate],
-      })
-      batchStatements.push({
-        sql:  'UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?',
-        args: [qty, item.material_id],
-      })
+      batchStatements.push({ sql: 'INSERT INTO purchase_bill_items (bill_id, material_id, qty, unit_cost, total) VALUES (?, ?, ?, ?, ?)', args: [newBillId, item.material_id, qty, unitCost, lineTotal] })
+      batchStatements.push({ sql: 'INSERT INTO material_cost_history (material_id, source, source_id, qty, unit_cost, total, date) VALUES (?, ?, ?, ?, ?, ?, ?)', args: [item.material_id, 'bill', newBillId, qty, unitCost, lineTotal, resolvedDate] })
+      batchStatements.push({ sql: 'UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?', args: [qty, item.material_id] })
     }
     if (supplier_id) {
-      batchStatements.push({
-        sql:  'UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?',
-        args: [total, supplier_id],
-      })
+      batchStatements.push({ sql: 'UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?', args: [total, supplier_id] })
     }
 
     await db.batch(batchStatements, 'write')
 
-    // Recalc avg costs + product costs (sequential per material, unavoidable)
     for (const item of items) {
       await recalcAvgCost(item.material_id)
       await recalcProductCosts(item.material_id)
@@ -243,6 +225,129 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
   }
 })
 
+// ── PUT edit bill ─────────────────────────────────────────────
+// Unpaid  → full reverse old items, apply new items, recalc stock/costs
+// Paid / Partial → amendment only: supplier, due_date, notes (no stock change)
+router.put('/:id', adminAuth, async (req, res) => {
+  try {
+    const billId = req.params.id
+    const bill   = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
+    if (!bill) return res.status(404).json({ error: 'Bill not found' })
+
+    let { supplier_id, bill_date, due_date, notes, items } = req.body
+    if (typeof items === 'string') { try { items = JSON.parse(items) } catch { items = [] } }
+
+    // ── PAID / PARTIAL — meta-only amendment ─────────────────
+    if (bill.status !== 'unpaid') {
+      const oldSupplierId = bill.supplier_id
+
+      // Track what actually changed for the audit log
+      const changes = {}
+      if (supplier_id !== undefined && String(supplier_id || '') !== String(oldSupplierId || '')) changes.supplier_id = { from: oldSupplierId, to: supplier_id }
+      if (due_date    !== undefined && due_date    !== bill.due_date)  changes.due_date  = { from: bill.due_date,  to: due_date }
+      if (notes       !== undefined && notes       !== bill.notes)     changes.notes     = { from: bill.notes,     to: notes }
+
+      await db.prepare(`
+        UPDATE purchase_bills
+        SET supplier_id = ?, due_date = ?, notes = ?
+        WHERE id = ?
+      `).run(
+        supplier_id !== undefined ? (supplier_id || null) : (oldSupplierId || null),
+        due_date    !== undefined ? (due_date    || null) : (bill.due_date || null),
+        notes       !== undefined ? notes : bill.notes,
+        billId
+      )
+
+      // If supplier changed, shift total_billed between the two suppliers
+      if (changes.supplier_id) {
+        const ops = []
+        if (oldSupplierId) ops.push({ sql: 'UPDATE suppliers SET total_billed = total_billed - ? WHERE id = ?', args: [bill.total, oldSupplierId] })
+        if (supplier_id)   ops.push({ sql: 'UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?', args: [bill.total, supplier_id] })
+        if (ops.length) await db.batch(ops, 'write')
+      }
+
+      auditLog({
+        req, action: 'AMEND', entity: 'bill', entityId: billId,
+        description: `Amended ${bill.status} bill ${bill.bill_number} (meta only — no stock change)`,
+        oldValue: bill, newValue: changes,
+      })
+
+      const updated = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
+      return res.json({ ...updated, amendment: true, changes })
+    }
+
+    // ── UNPAID — full reverse-and-reapply ─────────────────────
+    if (!items || !items.length) return res.status(400).json({ error: 'At least one item required' })
+
+    const matChecks = await Promise.all(
+      items.map(item => db.prepare('SELECT id FROM materials WHERE id = ?').get(item.material_id))
+    )
+    for (let i = 0; i < items.length; i++) {
+      if (!matChecks[i]) return res.status(400).json({ error: `Material ID ${items[i].material_id} not found` })
+    }
+
+    const oldItems      = await db.prepare('SELECT * FROM purchase_bill_items WHERE bill_id = ?').all(billId)
+    const oldSupplierId = bill.supplier_id
+    const resolvedDate  = bill_date || bill.bill_date
+    const newSubtotal   = items.reduce((s, i) => s + parseFloat(i.qty) * parseFloat(i.unit_cost), 0)
+    const newTotal      = newSubtotal
+
+    // Build one atomic batch: reverse → delete old → update header → insert new
+    const ops = []
+
+    // Reverse old stock
+    for (const item of oldItems) {
+      ops.push({ sql: 'UPDATE materials SET qty_in_stock = qty_in_stock - ? WHERE id = ?', args: [item.qty, item.material_id] })
+    }
+    // Delete old cost history for this bill
+    ops.push({ sql: 'DELETE FROM material_cost_history WHERE source = ? AND source_id = ?', args: ['bill', billId] })
+    // Delete old line items
+    ops.push({ sql: 'DELETE FROM purchase_bill_items WHERE bill_id = ?', args: [billId] })
+    // Reverse old supplier total_billed
+    if (oldSupplierId) ops.push({ sql: 'UPDATE suppliers SET total_billed = total_billed - ? WHERE id = ?', args: [bill.total, oldSupplierId] })
+    // Update bill header
+    ops.push({
+      sql:  'UPDATE purchase_bills SET supplier_id=?, bill_date=?, due_date=?, notes=?, subtotal=?, total=? WHERE id=?',
+      args: [supplier_id || null, resolvedDate, due_date || null, notes || '', newSubtotal, newTotal, billId],
+    })
+    // Insert new items + cost history + stock
+    for (const item of items) {
+      const qty       = parseFloat(item.qty)
+      const unitCost  = parseFloat(item.unit_cost)
+      const lineTotal = qty * unitCost
+      ops.push({ sql: 'INSERT INTO purchase_bill_items (bill_id, material_id, qty, unit_cost, total) VALUES (?,?,?,?,?)', args: [billId, item.material_id, qty, unitCost, lineTotal] })
+      ops.push({ sql: 'INSERT INTO material_cost_history (material_id, source, source_id, qty, unit_cost, total, date) VALUES (?,?,?,?,?,?,?)', args: [item.material_id, 'bill', billId, qty, unitCost, lineTotal, resolvedDate] })
+      ops.push({ sql: 'UPDATE materials SET qty_in_stock = qty_in_stock + ? WHERE id = ?', args: [qty, item.material_id] })
+    }
+    // Apply new supplier total_billed
+    if (supplier_id) ops.push({ sql: 'UPDATE suppliers SET total_billed = total_billed + ? WHERE id = ?', args: [newTotal, supplier_id] })
+
+    await db.batch(ops, 'write')
+
+    // Recalc avg cost for all touched materials (old + new)
+    const affectedMats = [...new Set([...oldItems.map(i => i.material_id), ...items.map(i => Number(i.material_id))])]
+    for (const matId of affectedMats) {
+      await recalcAvgCost(matId)
+      await recalcProductCosts(matId)
+    }
+
+    const updated = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
+
+    auditLog({
+      req, action: 'UPDATE', entity: 'bill', entityId: billId,
+      description: `Edited bill ${bill.bill_number} — new total Rs ${newTotal.toLocaleString()}`,
+      oldValue: { ...bill, items: oldItems },
+      newValue: { ...updated, items },
+    })
+
+    res.json({ ...updated, bill_image_url: updated.bill_image ? `${BASE_URL}/uploads/bills/${updated.bill_image}` : null })
+
+  } catch (err) {
+    console.error('Bill edit error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── POST record payment against a bill ───────────────────────
 router.post('/:id/pay', adminAuth, async (req, res) => {
   const { amount, payment_date, payment_method, bank_account, notes } = req.body
@@ -254,10 +359,9 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
 
   const resolvedDate = payment_date || new Date().toISOString().split('T')[0]
 
-  // Insert payment, then read running total, then update status — batched
   await db.batch([
     {
-      sql:  'INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      sql:  'INSERT INTO bill_payments (bill_id, amount, payment_date, payment_method, bank_account, notes, voided) VALUES (?, ?, ?, ?, ?, ?, 0)',
       args: [req.params.id, payAmount, resolvedDate, payment_method || 'bank', bank_account || null, notes || ''],
     },
     ...(bill.supplier_id ? [{
@@ -266,8 +370,7 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
     }] : []),
   ], 'write')
 
-  // Determine new status (need running total after insert)
-  const payRow = await db.prepare('SELECT SUM(amount) as total FROM bill_payments WHERE bill_id = ?').get(req.params.id)
+  const payRow = await db.prepare('SELECT SUM(amount) as total FROM bill_payments WHERE bill_id = ? AND voided = 0').get(req.params.id)
   const paid = Number(payRow?.total ?? 0)
   let status = 'unpaid'
   if (paid >= bill.total)  status = 'paid'
@@ -283,6 +386,53 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
   res.json({ success: true })
 })
 
+// ── POST void a payment (payment reversal) ────────────────────
+router.post('/:id/payments/:paymentId/void', adminAuth, async (req, res) => {
+  try {
+    const { reason } = req.body
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Void reason is required' })
+
+    const bill    = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
+    const payment = await db.prepare('SELECT * FROM bill_payments WHERE id = ? AND bill_id = ?').get(req.params.paymentId, req.params.id)
+
+    if (!bill)    return res.status(404).json({ error: 'Bill not found' })
+    if (!payment) return res.status(404).json({ error: 'Payment not found' })
+    if (payment.voided) return res.status(400).json({ error: 'Payment already voided' })
+
+    // Mark payment as voided
+    await db.prepare(`
+      UPDATE bill_payments SET voided = 1, void_reason = ?, voided_at = CURRENT_TIMESTAMP, voided_by = ?
+      WHERE id = ?
+    `).run(reason.trim(), req.admin?.email || 'system', payment.id)
+
+    // Reverse supplier total_paid
+    if (bill.supplier_id) {
+      await db.prepare('UPDATE suppliers SET total_paid = total_paid - ? WHERE id = ?').run(payment.amount, bill.supplier_id)
+    }
+
+    // Recalculate bill status from remaining active payments
+    const payRow = await db.prepare('SELECT SUM(amount) as total FROM bill_payments WHERE bill_id = ? AND voided = 0').get(req.params.id)
+    const paid   = Number(payRow?.total ?? 0)
+    let status   = 'unpaid'
+    if (paid >= bill.total)  status = 'paid'
+    else if (paid > 0)       status = 'partial'
+    await db.prepare('UPDATE purchase_bills SET status = ? WHERE id = ?').run(status, req.params.id)
+
+    auditLog({
+      req, action: 'VOID', entity: 'bill_payment', entityId: payment.id,
+      description: `Voided payment of Rs ${payment.amount.toLocaleString()} on bill ${bill.bill_number} — reason: ${reason}`,
+      oldValue: payment,
+      newValue: { voided: true, void_reason: reason },
+    })
+
+    res.json({ success: true, newStatus: status, paidSoFar: paid })
+
+  } catch (err) {
+    console.error('Void payment error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── DELETE bill ───────────────────────────────────────────────
 router.delete('/:id', adminAuth, async (req, res) => {
   const bill = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
@@ -291,7 +441,6 @@ router.delete('/:id', adminAuth, async (req, res) => {
 
   const items = await db.prepare('SELECT * FROM purchase_bill_items WHERE bill_id = ?').all(bill.id)
 
-  // Batch: reverse stock + clear history + delete rows
   const batchStatements = items.flatMap(item => [
     { sql: 'UPDATE materials SET qty_in_stock = qty_in_stock - ? WHERE id = ?', args: [item.qty, item.material_id] },
     { sql: 'DELETE FROM material_cost_history WHERE source = ? AND source_id = ?', args: ['bill', bill.id] },
@@ -304,7 +453,6 @@ router.delete('/:id', adminAuth, async (req, res) => {
 
   await db.batch(batchStatements, 'write')
 
-  // Recalc avg costs + product costs after stock reversal
   for (const item of items) {
     await recalcAvgCost(item.material_id)
     await recalcProductCosts(item.material_id)
