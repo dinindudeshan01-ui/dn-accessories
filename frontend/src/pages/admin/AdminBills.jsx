@@ -16,37 +16,31 @@ export default function AdminBills() {
   const [materials, setMaterials] = useState([])
   const [loading,   setLoading]   = useState(true)
   const [expanded,  setExpanded]  = useState(null)
-  const [modal,     setModal]     = useState(null)   // null | 'new' | 'edit' | 'pay' (bill obj) | 'void' (payment obj)
+  const [modal,     setModal]     = useState(null)
   const [saving,    setSaving]    = useState(false)
   const [imageModal,setImageModal]= useState(null)
   const fileRef = useRef()
 
-  // Quick-add supplier inline
   const [showAddSupplier, setShowAddSupplier] = useState(false)
   const [newSupplier,     setNewSupplier]     = useState({ name:'', phone:'', email:'' })
   const [savingSupplier,  setSavingSupplier]  = useState(false)
 
-  // Quick-add material inline (tracks which line-item row has the panel open)
   const [addMatIdx,   setAddMatIdx]   = useState(null)
   const [newMaterial, setNewMaterial] = useState({ name:'', unit:'g' })
   const [savingMat,   setSavingMat]   = useState(false)
 
-  // New bill form
   const emptyForm = () => ({ supplier_id:'', bill_date:today(), due_date:'', notes:'', items:[{ material_id:'', qty:'', unit_cost:'' }] })
   const [form,    setForm]    = useState(emptyForm())
   const [billImg, setBillImg] = useState(null)
   const [imgPrev, setImgPrev] = useState(null)
 
-  // Edit bill state
-  const [editBill, setEditBill]   = useState(null)   // the bill being edited
-  const [editForm, setEditForm]   = useState(null)
+  const [editBill,    setEditBill]    = useState(null)
+  const [editForm,    setEditForm]    = useState(null)
   const [editLoading, setEditLoading] = useState(false)
 
-  // Payment form
   const [payForm, setPayForm] = useState({ amount:'', payment_date:today(), payment_method:'bank', bank_account:'BOC', notes:'' })
 
-  // Void payment state
-  const [voidTarget, setVoidTarget] = useState(null)   // { bill, payment }
+  const [voidTarget, setVoidTarget] = useState(null)
   const [voidReason, setVoidReason] = useState('')
 
   function today() { return new Date().toISOString().split('T')[0] }
@@ -67,7 +61,6 @@ export default function AdminBills() {
     } finally { setLoading(false) }
   }
 
-  // ── Bill image pick ───────────────────────────────────────────
   function handleImage(file) {
     if (!file) return
     setBillImg(file)
@@ -78,17 +71,15 @@ export default function AdminBills() {
     } else { setImgPrev('pdf') }
   }
 
-  // ── Line items (new bill) ─────────────────────────────────────
   function addItem() { setForm(f => ({ ...f, items:[...f.items, { material_id:'', qty:'', unit_cost:'' }] })) }
 
-  // FIX #4 — shift addMatIdx when a row above the open panel is removed
   function removeItem(i) {
     setForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }))
     setAddMatIdx(cur => {
       if (cur === null) return null
-      if (i < cur)   return cur - 1   // removed above → shift panel index down
-      if (i === cur) return null       // removed the open row → close panel
-      return cur                        // removed below → no change
+      if (i < cur)   return cur - 1
+      if (i === cur) return null
+      return cur
     })
   }
 
@@ -106,7 +97,6 @@ export default function AdminBills() {
 
   const billTotal = form.items.reduce((s, i) => s + ((parseFloat(i.qty)||0) * (parseFloat(i.unit_cost)||0)), 0)
 
-  // ── Quick-add supplier ────────────────────────────────────────
   async function saveQuickSupplier() {
     if (!newSupplier.name.trim()) return
     setSavingSupplier(true)
@@ -120,7 +110,6 @@ export default function AdminBills() {
     } finally { setSavingSupplier(false) }
   }
 
-  // ── Quick-add material ────────────────────────────────────────
   async function saveQuickMaterial() {
     if (!newMaterial.name.trim()) return
     setSavingMat(true)
@@ -134,7 +123,6 @@ export default function AdminBills() {
     } finally { setSavingMat(false) }
   }
 
-  // ── Save new bill ─────────────────────────────────────────────
   async function saveBill() {
     const validItems = form.items.filter(i => i.material_id && i.qty && i.unit_cost)
     if (!validItems.length) return alert('Add at least one complete line item')
@@ -156,7 +144,6 @@ export default function AdminBills() {
     } finally { setSaving(false) }
   }
 
-  // ── Open edit bill modal ──────────────────────────────────────
   async function openEditBill(b) {
     setEditBill(b)
     setEditLoading(true)
@@ -178,7 +165,6 @@ export default function AdminBills() {
     } finally { setEditLoading(false) }
   }
 
-  // ── Line items helpers for edit form ──────────────────────────
   function editAddItem() {
     setEditForm(f => ({ ...f, items:[...f.items, { material_id:'', qty:'', unit_cost:'' }] }))
   }
@@ -197,7 +183,6 @@ export default function AdminBills() {
     })
   }
 
-  // ── Save edited bill ──────────────────────────────────────────
   async function saveEditBill() {
     if (!editBill || !editForm) return
     const isUnpaid = editBill.status === 'unpaid'
@@ -224,7 +209,6 @@ export default function AdminBills() {
     } finally { setSaving(false) }
   }
 
-  // ── Record payment ────────────────────────────────────────────
   async function savePayment() {
     if (!payForm.amount) return
     setSaving(true)
@@ -235,7 +219,6 @@ export default function AdminBills() {
     } finally { setSaving(false) }
   }
 
-  // ── Void payment ──────────────────────────────────────────────
   async function confirmVoid() {
     if (!voidReason.trim()) return alert('Please enter a reason for voiding this payment')
     setSaving(true)
@@ -244,7 +227,6 @@ export default function AdminBills() {
       await load()
       setVoidTarget(null)
       setVoidReason('')
-      // If the expanded detail is open, refresh it by toggling
       if (expanded === voidTarget.bill.id) {
         setExpanded(null)
         setTimeout(() => setExpanded(voidTarget.bill.id), 50)
@@ -252,14 +234,12 @@ export default function AdminBills() {
     } finally { setSaving(false) }
   }
 
-  // ── Delete bill ───────────────────────────────────────────────
   async function deleteBill(id) {
     if (!confirm('Delete this bill? Stock will be reversed.')) return
     try { await adminApi.delete(`/bills/${id}`); await load() }
     catch (e) { alert(e.response?.data?.error || 'Cannot delete this bill') }
   }
 
-  // ── KPIs ──────────────────────────────────────────────────────
   const totalBilled = bills.reduce((s, b) => s + b.total, 0)
   const totalPaid   = bills.reduce((s, b) => s + (b.amount_paid || 0), 0)
   const outstanding = totalBilled - totalPaid
@@ -298,7 +278,6 @@ export default function AdminBills() {
                 const cfg  = billStatusCfg[b.status] || billStatusCfg.unpaid
                 const owed = b.total - (b.amount_paid || 0)
                 return (
-                  // FIX #3 — keyed React.Fragment so expanded rows render on the correct bill
                   <React.Fragment key={b.id}>
                     <Tr onClick={() => setExpanded(expanded === b.id ? null : b.id)}>
                       <Td><span style={{ fontFamily:'monospace', fontSize:12, color:T.gold, fontWeight:700 }}>{b.bill_number}</span></Td>
@@ -314,7 +293,6 @@ export default function AdminBills() {
                       </Td>
                       <Td onClick={e => e.stopPropagation()}>
                         <div style={{ display:'flex', gap:6 }}>
-                          {/* Edit button — always visible */}
                           <Btn size="sm" variant="ghost" onClick={() => openEditBill(b)}>Edit</Btn>
                           {b.status !== 'paid' && (
                             <Btn size="sm" onClick={() => { setPayForm({ amount:'', payment_date:today(), payment_method:'bank', bank_account:'BOC', notes:'' }); setModal(b) }}>Pay</Btn>
@@ -390,9 +368,11 @@ export default function AdminBills() {
                   const isAddingMat = addMatIdx === i
                   return (
                     <div key={i}>
-                      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
+                      {/* ── FIX: 3-col grid (material | qty | unit cost) + action column ── */}
+                      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
+
+                        {/* Material select + new material toggle */}
                         <div>
-                          {/* FIX #6 — label="Material" added */}
                           <Select label="Material" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
                             <option value="">— Select material —</option>
                             {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
@@ -404,14 +384,22 @@ export default function AdminBills() {
                             {isAddingMat ? '▲ Cancel' : '+ New material'}
                           </button>
                         </div>
-                        <Input type="number" placeholder="Qty"       value={item.qty}       onChange={e => updateItem(i,'qty',e.target.value)} />
-                        <Input type="number" step="0.01" placeholder="Unit cost" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
-                        <div style={{ fontSize:12, color:T.pink, fontWeight:700, padding:'9px 0', textAlign:'right' }}>
-                          {lineTotal > 0 ? `Rs ${lineTotal.toLocaleString()}` : '—'}
+
+                        <Input label="Qty" type="number" placeholder="0" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
+                        <Input label="Unit cost" type="number" step="0.01" placeholder="0.00" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
+
+                        {/* Action column: × button on top, line total below */}
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, paddingBottom:2 }}>
+                          <button
+                            onClick={() => removeItem(i)}
+                            style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:18, lineHeight:1, padding:'2px 6px' }}
+                          >×</button>
+                          {lineTotal > 0 && (
+                            <div style={{ fontSize:11, fontWeight:700, color:T.pink, whiteSpace:'nowrap' }}>
+                              Rs {lineTotal.toLocaleString()}
+                            </div>
+                          )}
                         </div>
-                        {/* FIX #4 — removeItem now also shifts addMatIdx */}
-                        <button onClick={() => removeItem(i)}
-                          style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:18, padding:'4px 8px' }}>×</button>
                       </div>
 
                       {/* Quick-add material panel */}
@@ -479,7 +467,6 @@ export default function AdminBills() {
           onClose={() => { setModal(null); setEditBill(null); setEditForm(null) }}
           width={660}
         >
-          {/* Warning banner for paid/partial bills */}
           {editBill.status !== 'unpaid' && (
             <div style={{ background:'rgba(255,197,61,0.10)', border:'1px solid rgba(255,197,61,0.35)', borderRadius:10, padding:'12px 16px', marginBottom:16, fontSize:12, color:T.gold, lineHeight:1.5 }}>
               ⚠️ This bill is <strong style={{ textTransform:'uppercase' }}>{editBill.status}</strong>. You can only update the supplier, due date, and notes.
@@ -492,7 +479,6 @@ export default function AdminBills() {
           ) : (
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
 
-              {/* Supplier + dates */}
               <div style={{ display:'grid', gridTemplateColumns: editBill.status === 'unpaid' ? '1fr 1fr 1fr' : '1fr 1fr', gap:12 }}>
                 <Select label="Supplier" value={editForm.supplier_id} onChange={e => setEditForm(f=>({...f,supplier_id:e.target.value}))}>
                   <option value="">— No supplier —</option>
@@ -512,17 +498,29 @@ export default function AdminBills() {
                     {editForm.items.map((item, i) => {
                       const lineTotal = (parseFloat(item.qty)||0) * (parseFloat(item.unit_cost)||0)
                       return (
-                        <div key={i} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
-                          <Select label="Material" value={item.material_id} onChange={e => editUpdateItem(i,'material_id',e.target.value)}>
-                            <option value="">— Select material —</option>
-                            {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-                          </Select>
-                          <Input type="number" placeholder="Qty"       value={item.qty}       onChange={e => editUpdateItem(i,'qty',e.target.value)} />
-                          <Input type="number" step="0.01" placeholder="Unit cost" value={item.unit_cost} onChange={e => editUpdateItem(i,'unit_cost',e.target.value)} />
-                          <div style={{ fontSize:12, color:T.pink, fontWeight:700, padding:'9px 0', textAlign:'right' }}>
-                            {lineTotal > 0 ? `Rs ${lineTotal.toLocaleString()}` : '—'}
+                        <div key={i}>
+                          {/* ── FIX: same 3-col + action pattern as new bill ── */}
+                          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
+                            <Select label="Material" value={item.material_id} onChange={e => editUpdateItem(i,'material_id',e.target.value)}>
+                              <option value="">— Select material —</option>
+                              {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                            </Select>
+                            <Input label="Qty" type="number" placeholder="0" value={item.qty} onChange={e => editUpdateItem(i,'qty',e.target.value)} />
+                            <Input label="Unit cost" type="number" step="0.01" placeholder="0.00" value={item.unit_cost} onChange={e => editUpdateItem(i,'unit_cost',e.target.value)} />
+
+                            {/* Action column: × button + line total */}
+                            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, paddingBottom:2 }}>
+                              <button
+                                onClick={() => editRemoveItem(i)}
+                                style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:18, lineHeight:1, padding:'2px 6px' }}
+                              >×</button>
+                              {lineTotal > 0 && (
+                                <div style={{ fontSize:11, fontWeight:700, color:T.pink, whiteSpace:'nowrap' }}>
+                                  Rs {lineTotal.toLocaleString()}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <button onClick={() => editRemoveItem(i)} style={{ background:'none', border:'none', color:T.muted, cursor:'pointer', fontSize:18, padding:'4px 8px' }}>×</button>
                         </div>
                       )
                     })}
@@ -533,7 +531,6 @@ export default function AdminBills() {
                     onMouseLeave={e => { e.currentTarget.style.borderColor=T.border; e.currentTarget.style.color=T.muted }}
                   >+ Add Item</button>
 
-                  {/* New total preview */}
                   {editForm.items.length > 0 && (() => {
                     const t = editForm.items.reduce((s,i) => s + (parseFloat(i.qty)||0)*(parseFloat(i.unit_cost)||0), 0)
                     return t > 0 ? (
@@ -647,7 +644,6 @@ function BillDetail({ billId, imageModal, onVoidPayment }) {
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:20, padding:'8px 4px' }}>
 
-      {/* Line Items */}
       <div>
         <SLabel>Line Items</SLabel>
         {data.items.map((item, i) => (
@@ -664,7 +660,6 @@ function BillDetail({ billId, imageModal, onVoidPayment }) {
         </div>
       </div>
 
-      {/* Payments */}
       <div>
         <SLabel>Payment History</SLabel>
         {!data.payments?.length ? (
@@ -682,7 +677,6 @@ function BillDetail({ billId, imageModal, onVoidPayment }) {
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                 <span style={{ color:T.muted }}>{p.payment_date}</span>
-                {/* Void button — only for active payments */}
                 {!p.voided && onVoidPayment && (
                   <button
                     onClick={() => onVoidPayment(p)}
@@ -706,7 +700,6 @@ function BillDetail({ billId, imageModal, onVoidPayment }) {
         </div>
       </div>
 
-      {/* Bill image + notes */}
       <div>
         <SLabel>Bill Document</SLabel>
         {data.bill_image_url ? (
