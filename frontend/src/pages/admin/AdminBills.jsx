@@ -368,27 +368,17 @@ export default function AdminBills() {
                   const isAddingMat = addMatIdx === i
                   return (
                     <div key={i}>
-                      {/* ── FIX: 3-col grid (material | qty | unit cost) + action column ── */}
+                      {/* ── Row: all 4 cells are pure inputs — equal height guaranteed ── */}
                       <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
-
-                        {/* Material select + new material toggle */}
-                        <div>
-                          <Select label="Material" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
-                            <option value="">— Select material —</option>
-                            {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
-                          </Select>
-                          <button
-                            onClick={() => { setAddMatIdx(isAddingMat ? null : i); setNewMaterial({ name:'', unit:'g' }) }}
-                            style={{ marginTop:5, background:'none', border:'none', padding:0, fontSize:11, color:T.pink, cursor:'pointer', fontFamily:T.font }}
-                          >
-                            {isAddingMat ? '▲ Cancel' : '+ New material'}
-                          </button>
-                        </div>
+                        <Select label="Material" value={item.material_id} onChange={e => updateItem(i,'material_id',e.target.value)}>
+                          <option value="">— Select material —</option>
+                          {materials.map(m => <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>)}
+                        </Select>
 
                         <Input label="Qty" type="number" placeholder="0" value={item.qty} onChange={e => updateItem(i,'qty',e.target.value)} />
                         <Input label="Unit cost" type="number" step="0.01" placeholder="0.00" value={item.unit_cost} onChange={e => updateItem(i,'unit_cost',e.target.value)} />
 
-                        {/* Action column: × button on top, line total below */}
+                        {/* Action column: × button + line total */}
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, paddingBottom:2 }}>
                           <button
                             onClick={() => removeItem(i)}
@@ -401,6 +391,14 @@ export default function AdminBills() {
                           )}
                         </div>
                       </div>
+
+                      {/* ── "+ New material" lives BELOW the row, outside the grid ── */}
+                      <button
+                        onClick={() => { setAddMatIdx(isAddingMat ? null : i); setNewMaterial({ name:'', unit:'g' }) }}
+                        style={{ marginTop:5, background:'none', border:'none', padding:0, fontSize:11, color:T.pink, cursor:'pointer', fontFamily:T.font }}
+                      >
+                        {isAddingMat ? '▲ Cancel' : '+ New material'}
+                      </button>
 
                       {/* Quick-add material panel */}
                       {isAddingMat && (
@@ -499,7 +497,7 @@ export default function AdminBills() {
                       const lineTotal = (parseFloat(item.qty)||0) * (parseFloat(item.unit_cost)||0)
                       return (
                         <div key={i}>
-                          {/* ── FIX: same 3-col + action pattern as new bill ── */}
+                          {/* ── Row: pure inputs only — equal height ── */}
                           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr auto', gap:8, alignItems:'flex-end' }}>
                             <Select label="Material" value={item.material_id} onChange={e => editUpdateItem(i,'material_id',e.target.value)}>
                               <option value="">— Select material —</option>
