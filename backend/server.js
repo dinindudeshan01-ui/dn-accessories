@@ -5,7 +5,13 @@ const path    = require('path')
 const app     = express()
 const db      = require('./db')
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'https://dnaccessories.netlify.app' }))
+app.use(cors({
+  origin: [
+    'https://dnaccessories.netlify.app',
+    'http://localhost:5173',
+    'http://localhost:4173',
+  ]
+}))
 app.use(express.json())
 
 // ── Static file serving ───────────────────────────────────────
