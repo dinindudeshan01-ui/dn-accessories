@@ -10,6 +10,8 @@ app.use(cors({
     'https://dnaccessories.netlify.app',
     'http://localhost:5173',
     'http://localhost:4173',
+    'http://localhost:5174',
+
   ]
 }))
 app.use(express.json())
