@@ -27,6 +27,7 @@ import AdminInventoryReport  from './pages/admin/AdminInventoryReport'
 import AdminStudio   from './pages/admin/AdminStudio'
 import AdminAuditLog from './pages/admin/AdminAuditLog'
 import AdminReset    from './pages/admin/AdminReset'
+import AdminSettings from './pages/admin/AdminSettings'
 
 export default function App() {
   return (
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="studio"  element={<AdminStudio />}   />
             <Route path="audit"   element={<AdminAuditLog />} />
             <Route path="reset"   element={<AdminReset />}    />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
         </Routes>
       </AdminProvider>

@@ -74,17 +74,18 @@ const NAV_GROUPS = [
   {
     label: 'Reports',
     items: [
-      { to: '/admin/pl',               label: 'P & L',      icon: '▣' },
-      { to: '/admin/cashflow',         label: 'Cash Flow',  icon: '◈' },
-      { to: '/admin/inventory-report', label: 'Inventory',  icon: '▤' },
+      { to: '/admin/pl',               label: 'P & L',     icon: '▣' },
+      { to: '/admin/cashflow',         label: 'Cash Flow', icon: '◈' },
+      { to: '/admin/inventory-report', label: 'Inventory', icon: '▤' },
     ]
   },
   {
     label: 'System',
     items: [
-      { to: '/admin/studio',  label: 'Studio',     icon: '◑' },
-      { to: '/admin/audit',   label: 'Audit Log',  icon: '◨' },
-      { to: '/admin/reset',   label: 'Data Reset', icon: '⚠', danger: true },
+      { to: '/admin/settings', label: 'Settings',   icon: '◧' },
+      { to: '/admin/studio',   label: 'Studio',     icon: '◑' },
+      { to: '/admin/audit',    label: 'Audit Log',  icon: '◨' },
+      { to: '/admin/reset',    label: 'Data Reset', icon: '⚠', danger: true },
     ]
   },
 ]
