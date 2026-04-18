@@ -1,6 +1,6 @@
 // src/pages/admin/AdminCustomers.jsx — v2: LTV + VIP
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard, Card, CardHeader,
@@ -36,7 +36,7 @@ export default function AdminCustomers() {
   const [loading,   setLoading]   = useState(true)
   const [search,    setSearch]    = useState('')
   const [expanded,  setExpanded]  = useState(null)
-  const [sortBy,    setSortBy]    = useState('ltv') // ltv | orders | avg | recent
+  const [sortBy,    setSortBy]    = useState('ltv')
 
   useEffect(() => { load() }, [])
 
@@ -73,9 +73,9 @@ export default function AdminCustomers() {
       <PageContent>
 
         <KpiGrid>
-          <KpiCard label="Total Customers"  value={stats?.total   ?? '—'} color={T.pink} />
-          <KpiCard label="Repeat Customers" value={stats?.repeat  ?? '—'} color={T.cyan} />
-          <KpiCard label="VIP Customers"    value={stats?.vipCount ?? '—'} color={T.gold} />
+          <KpiCard label="Total Customers"  value={stats?.total    ?? '—'} />
+          <KpiCard label="Repeat Customers" value={stats?.repeat   ?? '—'} />
+          <KpiCard label="VIP Customers"    value={stats?.vipCount ?? '—'} accent />
           <KpiCard
             label="Top Spender"
             value={stats?.topSpend ? `Rs ${Number(stats.topSpend.spent).toLocaleString()}` : '—'}
@@ -116,7 +116,7 @@ export default function AdminCustomers() {
         </div>
 
         <Card>
-          <CardHeader title={`${filtered.length} Customer${filtered.length !== 1 ? 's' : ''}`} sub="Grouped by NIC" />
+          <CardHeader title={`${filtered.length} Customer${filtered.length !== 1 ? 's' : ''}`} />
 
           {loading ? (
             <div style={{ padding: 60, textAlign: 'center' }}><Spinner /></div>
@@ -127,11 +127,10 @@ export default function AdminCustomers() {
           ) : (
             <Table headers={['Customer', 'NIC', 'Contact', 'City', 'Orders', 'Avg Order', 'Total LTV', 'First → Last', '']}>
               {filtered.map((c, i) => (
-                <>
-                  <Tr key={c.nic + i}>
+                <React.Fragment key={c.nic || i}>
+                  <Tr onClick={() => setExpanded(expanded === c.nic ? null : c.nic)}>
                     <Td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {/* Avatar */}
                         <div style={{
                           width: 34, height: 34, borderRadius: 10,
                           background: c.is_vip ? 'rgba(255,197,61,0.15)' : 'rgba(255,45,120,0.12)',
@@ -139,76 +138,40 @@ export default function AdminCustomers() {
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: 14, fontWeight: 900,
                           color: c.is_vip ? T.gold : T.pink, flexShrink: 0,
-                          position: 'relative',
                         }}>
                           {c.full_name?.[0]?.toUpperCase() || '?'}
                         </div>
-
                         <div>
                           <div style={{ fontWeight: 700, color: T.text, fontSize: 13 }}>{c.full_name}</div>
                           <div style={{ display: 'flex', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
                             {c.is_vip && (
-                              <span style={{
-                                fontSize: 9, fontWeight: 800, color: T.gold,
-                                background: 'rgba(255,197,61,0.12)', padding: '1px 6px',
-                                borderRadius: 999, letterSpacing: '0.06em'
-                              }}>⭐ VIP</span>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: T.gold, background: 'rgba(255,197,61,0.12)', padding: '1px 6px', borderRadius: 999, letterSpacing: '0.06em' }}>⭐ VIP</span>
                             )}
                             {c.order_count > 1 && (
-                              <span style={{
-                                fontSize: 9, fontWeight: 700, color: T.lime,
-                                background: 'rgba(184,255,60,0.1)', padding: '1px 6px',
-                                borderRadius: 999, letterSpacing: '0.06em'
-                              }}>REPEAT</span>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: T.lime, background: 'rgba(184,255,60,0.1)', padding: '1px 6px', borderRadius: 999, letterSpacing: '0.06em' }}>REPEAT</span>
                             )}
                           </div>
                         </div>
                       </div>
                     </Td>
-
-                    <Td>
-                      <span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{c.nic || '—'}</span>
-                    </Td>
-
+                    <Td><span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{c.nic || '—'}</span></Td>
                     <Td>
                       <div style={{ fontSize: 12, color: T.text }}>{c.phone1}</div>
                       {c.phone2 && <div style={{ fontSize: 11, color: T.muted }}>{c.phone2}</div>}
                     </Td>
-
+                    <Td><span style={{ fontSize: 12, color: T.muted }}>{c.city || '—'}</span></Td>
                     <Td>
-                      <span style={{ fontSize: 12, color: T.muted }}>{c.city || '—'}</span>
+                      <span style={{ fontWeight: 800, color: T.cyan, background: 'rgba(0,229,255,0.08)', padding: '3px 10px', borderRadius: 999, fontSize: 12 }}>{c.order_count}</span>
                     </Td>
-
-                    <Td>
-                      <span style={{
-                        fontWeight: 800, color: T.cyan,
-                        background: 'rgba(0,229,255,0.08)',
-                        padding: '3px 10px', borderRadius: 999, fontSize: 12
-                      }}>{c.order_count}</span>
-                    </Td>
-
-                    <Td>
-                      <span style={{ fontSize: 12, color: T.text }}>
-                        Rs {Math.round(c.avg_order_value || 0).toLocaleString()}
-                      </span>
-                    </Td>
-
-                    <Td>
-                      <span style={{ fontWeight: 800, color: T.gold, fontSize: 13 }}>
-                        Rs {Number(c.total_spent).toLocaleString()}
-                      </span>
-                    </Td>
-
+                    <Td><span style={{ fontSize: 12, color: T.text }}>Rs {Math.round(c.avg_order_value || 0).toLocaleString()}</span></Td>
+                    <Td><span style={{ fontWeight: 800, color: T.gold, fontSize: 13 }}>Rs {Number(c.total_spent).toLocaleString()}</span></Td>
                     <Td>
                       <div style={{ fontSize: 10, color: T.muted }}>
                         <div>{c.first_order ? new Date(c.first_order).toLocaleDateString() : '—'}</div>
-                        <div style={{ color: T.text, fontSize: 11, marginTop: 2 }}>
-                          → {c.last_order ? new Date(c.last_order).toLocaleDateString() : '—'}
-                        </div>
+                        <div style={{ color: T.text, fontSize: 11, marginTop: 2 }}>→ {c.last_order ? new Date(c.last_order).toLocaleDateString() : '—'}</div>
                       </div>
                     </Td>
-
-                    <Td>
+                    <Td onClick={e => e.stopPropagation()}>
                       <Btn size="sm" variant="ghost" onClick={() => setExpanded(expanded === c.nic ? null : c.nic)}>
                         {expanded === c.nic ? '▲ Hide' : '▼ Orders'}
                       </Btn>
@@ -216,7 +179,7 @@ export default function AdminCustomers() {
                   </Tr>
 
                   {expanded === c.nic && (
-                    <tr key={c.nic + '-exp'}>
+                    <tr key={`${c.nic}-exp`}>
                       <td colSpan={9} style={{ padding: '0 0 12px 0', background: 'transparent' }}>
                         <div style={{
                           margin: '0 8px', borderRadius: 12,
@@ -224,25 +187,16 @@ export default function AdminCustomers() {
                           border: `1px solid ${c.is_vip ? 'rgba(255,197,61,0.12)' : 'rgba(255,45,120,0.12)'}`,
                           overflow: 'hidden'
                         }}>
-                          <div style={{
-                            padding: '10px 16px', borderBottom: `1px solid ${T.border}`,
-                            fontSize: 12, color: T.muted, display: 'flex', gap: 24, flexWrap: 'wrap',
-                          }}>
+                          <div style={{ padding: '10px 16px', borderBottom: `1px solid ${T.border}`, fontSize: 12, color: T.muted, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                             <span>📍 {[c.address, c.city].filter(Boolean).join(', ') || 'No address'}</span>
-                            <span>📦 {c.order_count} orders  ·  Rs {Number(c.total_spent).toLocaleString()} lifetime</span>
+                            <span>📦 {c.order_count} orders · Rs {Number(c.total_spent).toLocaleString()} lifetime</span>
                             <span>📅 First: {c.first_order ? new Date(c.first_order).toLocaleDateString() : '—'}</span>
                           </div>
-
                           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                               <tr>
-                                {['Reference','Date','Items','Total','Status'].map(h => (
-                                  <th key={h} style={{
-                                    padding: '8px 14px', textAlign: 'left',
-                                    fontSize: 10, fontWeight: 800, color: T.muted,
-                                    letterSpacing: '0.1em', textTransform: 'uppercase',
-                                    borderBottom: `1px solid ${T.border}`
-                                  }}>{h}</th>
+                                {['Reference', 'Date', 'Items', 'Total', 'Status'].map(h => (
+                                  <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontSize: 10, fontWeight: 800, color: T.muted, letterSpacing: '0.1em', textTransform: 'uppercase', borderBottom: `1px solid ${T.border}` }}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
@@ -268,7 +222,7 @@ export default function AdminCustomers() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </Table>
           )}
