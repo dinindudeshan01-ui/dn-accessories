@@ -1,10 +1,25 @@
-import { useState, useEffect } from 'react'
+// src/pages/admin/AdminPL.jsx
+// Phase 4: + PDF export (browser print API) + Monthly Budget vs Actual
+
+import { useState, useEffect, useRef } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard,
   Card, CardHeader, Select, Spinner, Modal, Btn,
-  PLSection, PLRow, PLTotal, NetProfitRow, tokens as T
+  PLSection, PLRow, PLTotal, NetProfitRow, Input, tokens as T
 } from '../../components/admin/AdminUI'
+
+// ── Budget helpers (localStorage, no backend) ─────────────────────────────────
+const BUDGET_KEY = 'dn_pl_budgets'
+function loadBudgets() {
+  try { return JSON.parse(localStorage.getItem(BUDGET_KEY) || '{}') }
+  catch { return {} }
+}
+function saveBudgets(b) {
+  localStorage.setItem(BUDGET_KEY, JSON.stringify(b))
+}
+
+const DEFAULT_BUDGET_CATS = ['Revenue', 'COGS', 'Marketing', 'Delivery / Shipping', 'Platform Fees', 'Packaging', 'Other']
 
 export default function AdminPL() {
   const [data,         setData]         = useState(null)
@@ -18,6 +33,10 @@ export default function AdminPL() {
     return d.toISOString().slice(0, 7)
   })
   const [compareLoading, setCompareLoading] = useState(false)
+  const [budgets,        setBudgets]        = useState(loadBudgets())
+  const [budgetEdit,     setBudgetEdit]     = useState(false)
+  const [budgetDraft,    setBudgetDraft]    = useState({})
+  const printRef = useRef()
 
   useEffect(() => { load() }, [month])
 
@@ -46,8 +65,176 @@ export default function AdminPL() {
     return d.toISOString().slice(0, 7)
   })
 
-  const fmtMonth  = m => new Date(m + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+  const fmtMonth   = m => new Date(m + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
   const monthLabel = fmtMonth(month)
+
+  // ── PDF Export via browser print API ─────────────────────────────────────────
+  function exportPDF() {
+    if (!data) return
+    const expRows = data.expenses.length === 0
+      ? '<tr><td colspan="2" style="color:#6b6b85;padding:8px 0;">No expenses recorded</td></tr>'
+      : data.expenses.map(e =>
+          `<tr><td style="padding:7px 0;color:#d0d0e8;">${e.category}</td><td style="text-align:right;color:#ff6b6b;">(Rs ${Math.round(e.total).toLocaleString()})</td></tr>`
+        ).join('')
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>P&L Statement — ${monthLabel}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #fff; color: #1a1a2e; padding: 40px; font-size: 13px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #e0e0f0; }
+    .company { font-size: 22px; font-weight: 900; color: #1a1a2e; }
+    .company span { color: #ff2d78; }
+    .doc-info { text-align: right; color: #6b6b85; font-size: 12px; line-height: 1.8; }
+    .doc-info strong { color: #1a1a2e; font-size: 15px; display: block; }
+    table { width: 100%; border-collapse: collapse; }
+    .section-header td { padding: 12px 0 4px; font-size: 9px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: #ff2d78; border-bottom: 1px solid #e8e8f8; }
+    .row td { padding: 8px 0; border-bottom: 1px solid #f0f0f8; }
+    .total-row td { padding: 10px 0; font-weight: 700; font-size: 13.5px; border-top: 2px solid #e0e0f0; background: #f8f8ff; }
+    .net-row td { padding: 14px 0; font-weight: 900; font-size: 16px; border-top: 3px solid #1a1a2e; }
+    .right { text-align: right; font-family: 'DM Sans', monospace; }
+    .green { color: #16a34a; }
+    .red   { color: #dc2626; }
+    .muted { color: #6b6b85; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 28px; }
+    .kpi { border: 1px solid #e0e0f0; border-radius: 10px; padding: 14px 16px; }
+    .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b85; margin-bottom: 4px; }
+    .kpi-value { font-size: 18px; font-weight: 900; color: #1a1a2e; }
+    .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e0e0f0; font-size: 11px; color: #aaa; text-align: center; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="company">D<span>&</span>N Accessories</div>
+      <div style="color:#6b6b85;font-size:12px;margin-top:4px;">Income Statement (Accrual Basis)</div>
+    </div>
+    <div class="doc-info">
+      <strong>Profit & Loss Statement</strong>
+      Period: ${monthLabel}<br>
+      Generated: ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}<br>
+      Confirmed sales only
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Gross Revenue</div>
+      <div class="kpi-value">Rs ${Math.round(data.revenue).toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">COGS</div>
+      <div class="kpi-value">Rs ${Math.round(data.cogs).toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Gross Profit</div>
+      <div class="kpi-value ${data.grossProfit >= 0 ? 'green' : 'red'}">Rs ${Math.round(data.grossProfit).toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Net Profit</div>
+      <div class="kpi-value ${data.netProfit >= 0 ? 'green' : 'red'}">Rs ${Math.round(data.netProfit).toLocaleString()}</div>
+    </div>
+  </div>
+
+  <table>
+    <tr class="section-header"><td colspan="2">Income</td></tr>
+    <tr class="row"><td>Product Sales</td><td class="right green">Rs ${Math.round(data.revenue).toLocaleString()}</td></tr>
+    <tr class="total-row"><td>Total Income</td><td class="right green">Rs ${Math.round(data.revenue).toLocaleString()}</td></tr>
+
+    <tr class="section-header"><td colspan="2">Cost of Goods Sold</td></tr>
+    <tr class="row"><td>Materials Used in Sales</td><td class="right red">(Rs ${Math.round(data.cogs).toLocaleString()})</td></tr>
+    <tr class="total-row"><td>Total COGS</td><td class="right red">(Rs ${Math.round(data.cogs).toLocaleString()})</td></tr>
+
+    <tr class="section-header"><td colspan="2">Operating Expenses</td></tr>
+    ${expRows}
+    <tr class="total-row"><td>Total Operating Expenses</td><td class="right red">(Rs ${Math.round(data.totalExpenses).toLocaleString()})</td></tr>
+
+    <tr class="net-row">
+      <td>Net ${data.netProfit >= 0 ? 'Profit' : 'Loss'}</td>
+      <td class="right ${data.netProfit >= 0 ? 'green' : 'red'}">Rs ${Math.round(Math.abs(data.netProfit)).toLocaleString()}</td>
+    </tr>
+  </table>
+
+  ${data.cogsByProduct?.length > 0 ? `
+  <div style="margin-top:28px;">
+    <div style="font-size:9px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:#ff2d78;margin-bottom:12px;">Gross Margin by Product</div>
+    <table>
+      <tr style="background:#f8f8ff;">
+        ${['Product','Units','Revenue','COGS','Gross Profit','Margin %'].map(h => `<td style="padding:8px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b85;">${h}</td>`).join('')}
+      </tr>
+      ${data.cogsByProduct.map(p => {
+        const rev = (Number(p.selling_price)||0) * (Number(p.total_qty)||0)
+        const gp  = rev - Number(p.total_cost)
+        const m   = rev > 0 ? (gp/rev*100).toFixed(1) : null
+        return `<tr style="border-bottom:1px solid #f0f0f8;">
+          <td style="padding:7px 8px;font-weight:600;">${p.product_name}</td>
+          <td style="padding:7px 8px;color:#6b6b85;">${p.total_qty}</td>
+          <td style="padding:7px 8px;color:#16a34a;">Rs ${rev > 0 ? Math.round(rev).toLocaleString() : '—'}</td>
+          <td style="padding:7px 8px;color:#dc2626;">Rs ${Math.round(p.total_cost).toLocaleString()}</td>
+          <td style="padding:7px 8px;font-weight:700;color:${gp>=0?'#16a34a':'#dc2626'};">${rev>0?`Rs ${Math.round(gp).toLocaleString()}`:'—'}</td>
+          <td style="padding:7px 8px;">${m ? `${m}%` : '—'}</td>
+        </tr>`
+      }).join('')}
+    </table>
+  </div>` : ''}
+
+  <div class="footer">D&amp;N Accessories · Accrual-basis P&amp;L · ${monthLabel} · Generated ${new Date().toLocaleDateString()}</div>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
+    win.onload = () => { win.focus(); win.print() }
+  }
+
+  // ── Budget management ─────────────────────────────────────────────────────────
+  function openBudgetEdit() {
+    const b = budgets[month] || {}
+    const draft = {}
+    DEFAULT_BUDGET_CATS.forEach(cat => { draft[cat] = b[cat] != null ? String(b[cat]) : '' })
+    // also add any expense categories present in data
+    if (data?.expenses) {
+      data.expenses.forEach(e => {
+        if (!draft[e.category]) draft[e.category] = b[e.category] != null ? String(b[e.category]) : ''
+      })
+    }
+    setBudgetDraft(draft)
+    setBudgetEdit(true)
+  }
+  function saveBudgetEdit() {
+    const parsed = {}
+    Object.entries(budgetDraft).forEach(([k, v]) => {
+      const n = parseFloat(v)
+      if (!isNaN(n) && n > 0) parsed[k] = n
+    })
+    const updated = { ...budgets, [month]: parsed }
+    setBudgets(updated)
+    saveBudgets(updated)
+    setBudgetEdit(false)
+  }
+  const monthBudget = budgets[month] || {}
+
+  // RAG color
+  function ragColor(actual, budget) {
+    if (!budget) return T.muted
+    const pct = actual / budget
+    if (pct <= 0.85) return T.lime
+    if (pct <= 1.0)  return T.gold
+    return T.pink
+  }
+  function ragBg(actual, budget) {
+    if (!budget) return 'transparent'
+    const pct = actual / budget
+    if (pct <= 0.85) return 'rgba(184,255,60,0.10)'
+    if (pct <= 1.0)  return 'rgba(255,197,61,0.10)'
+    return 'rgba(255,45,120,0.10)'
+  }
 
   return (
     <>
@@ -55,9 +242,17 @@ export default function AdminPL() {
         title="Profit & Loss"
         subtitle="Accrual basis — confirmed sales only"
         action={
-          <Select value={month} onChange={e => setMonth(e.target.value)} style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}>
-            {months.map(m => <option key={m} value={m}>{fmtMonth(m)}</option>)}
-          </Select>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {tab === 'statement' && data && (
+              <>
+                <Btn size="sm" variant="ghost" onClick={openBudgetEdit}>⚙ Budget</Btn>
+                <Btn size="sm" variant="ghost" onClick={exportPDF}>⬇ PDF</Btn>
+              </>
+            )}
+            <Select value={month} onChange={e => setMonth(e.target.value)} style={{ width: 'auto', padding: '7px 12px', fontSize: 12 }}>
+              {months.map(m => <option key={m} value={m}>{fmtMonth(m)}</option>)}
+            </Select>
+          </div>
         }
       />
 
@@ -65,7 +260,11 @@ export default function AdminPL() {
 
         {/* ── Tab switcher ── */}
         <div style={{ display: 'flex', gap: 2, marginBottom: 20, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 4, width: 'fit-content' }}>
-          {[{ k: 'statement', l: 'Income Statement' }, { k: 'compare', l: 'Compare Months' }].map(t => (
+          {[
+            { k: 'statement', l: 'Income Statement' },
+            { k: 'budget',    l: 'Budget vs Actual' },
+            { k: 'compare',   l: 'Compare Months'   },
+          ].map(t => (
             <button key={t.k} onClick={() => setTab(t.k)} style={{
               padding: '7px 20px', fontSize: 12, fontWeight: 700,
               borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: T.font,
@@ -92,7 +291,6 @@ export default function AdminPL() {
                   change={data.revenue > 0 ? `${((data.netProfit / data.revenue) * 100).toFixed(0)}% margin` : ''} />
               </KpiGrid>
 
-              {/* Cost variance alerts */}
               {data.costVariances?.length > 0 && (
                 <div style={{ padding: '12px 16px', marginBottom: 16, background: 'rgba(255,197,61,0.08)', border: '1px solid rgba(255,197,61,0.25)', borderRadius: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.gold, marginBottom: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
@@ -110,7 +308,6 @@ export default function AdminPL() {
                 </div>
               )}
 
-              {/* Stock valuation */}
               {data.stockValuation && (
                 <div style={{ padding: '10px 16px', marginBottom: 16, background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.18)', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, color: T.cyan }}>Closing stock value (current inventory at avg cost)</span>
@@ -118,7 +315,6 @@ export default function AdminPL() {
                 </div>
               )}
 
-              {/* No recipe warning */}
               {data.noRecipe?.length > 0 && (
                 <div style={{ padding: '12px 16px', marginBottom: 16, background: 'rgba(255,197,61,0.08)', border: '1px solid rgba(255,197,61,0.25)', borderRadius: 12, fontSize: 12, color: T.gold }}>
                   ⚠ {data.noRecipe.length} product{data.noRecipe.length > 1 ? 's' : ''} sold without a recipe — COGS may be understated.
@@ -126,7 +322,6 @@ export default function AdminPL() {
                 </div>
               )}
 
-              {/* Income statement card */}
               <Card>
                 <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Income Statement</span>
@@ -163,7 +358,6 @@ export default function AdminPL() {
                 )}
               </Card>
 
-              {/* Gross margin per product */}
               {data.cogsByProduct?.length > 0 && (
                 <Card>
                   <CardHeader title="Gross Margin by Product" />
@@ -211,6 +405,144 @@ export default function AdminPL() {
                   </div>
                 </Card>
               )}
+            </>
+          )
+        )}
+
+        {/* ── BUDGET VS ACTUAL TAB ── */}
+        {tab === 'budget' && (
+          loading || !data ? <Spinner /> : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: T.muted }}>
+                  Budgets are stored locally in this browser.
+                  <span style={{ marginLeft: 8, padding: '2px 8px', background: 'rgba(184,255,60,0.1)', color: T.lime, borderRadius: 99, fontSize: 11, fontWeight: 700 }}>Green ≤85%</span>
+                  <span style={{ marginLeft: 6, padding: '2px 8px', background: 'rgba(255,197,61,0.1)', color: T.gold, borderRadius: 99, fontSize: 11, fontWeight: 700 }}>Amber ≤100%</span>
+                  <span style={{ marginLeft: 6, padding: '2px 8px', background: 'rgba(255,45,120,0.1)', color: T.pink, borderRadius: 99, fontSize: 11, fontWeight: 700 }}>Red &gt;100%</span>
+                </div>
+                <Btn size="sm" variant="ghost" onClick={openBudgetEdit}>⚙ Edit Budgets</Btn>
+              </div>
+
+              <Card>
+                <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}` }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Budget vs Actual — {monthLabel}</span>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        {['Category', 'Budget (Rs)', 'Actual (Rs)', 'Variance', '% Used', 'Status'].map((h, i) => (
+                          <th key={i} style={{ padding: '10px 16px', textAlign: i >= 1 ? 'right' : 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: T.muted, borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Revenue row */}
+                      {(() => {
+                        const actual = data.revenue
+                        const budget = monthBudget['Revenue'] || 0
+                        const variance = actual - budget
+                        const pct = budget > 0 ? (actual / budget * 100) : null
+                        const isGood = actual >= budget
+                        return (
+                          <tr className="dn-tr">
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, fontWeight: 600, color: T.text }}>Revenue</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.muted, textAlign: 'right', fontFamily: T.mono }}>{budget > 0 ? `Rs ${budget.toLocaleString()}` : '—'}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.lime, textAlign: 'right', fontFamily: T.mono, fontWeight: 700 }}>Rs {Math.round(actual).toLocaleString()}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', fontFamily: T.mono, color: budget > 0 ? (isGood ? T.lime : T.pink) : T.muted }}>
+                              {budget > 0 ? `${variance >= 0 ? '+' : ''}Rs ${Math.round(variance).toLocaleString()}` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', color: T.muted }}>
+                              {pct !== null ? `${pct.toFixed(0)}%` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right' }}>
+                              {budget > 0 ? (
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99,
+                                  background: ragBg(actual, budget), color: ragColor(actual, budget) }}>
+                                  {isGood ? '✓ On track' : '⚠ Under'}
+                                </span>
+                              ) : <span style={{ color: T.muted, fontSize: 11 }}>No budget</span>}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* COGS row */}
+                      {(() => {
+                        const actual = data.cogs
+                        const budget = monthBudget['COGS'] || 0
+                        const variance = budget - actual
+                        const pct = budget > 0 ? (actual / budget * 100) : null
+                        const overBudget = budget > 0 && actual > budget
+                        return (
+                          <tr className="dn-tr">
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, fontWeight: 600, color: T.text }}>COGS</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.muted, textAlign: 'right', fontFamily: T.mono }}>{budget > 0 ? `Rs ${budget.toLocaleString()}` : '—'}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.pink, textAlign: 'right', fontFamily: T.mono, fontWeight: 700 }}>Rs {Math.round(actual).toLocaleString()}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', fontFamily: T.mono, color: budget > 0 ? (!overBudget ? T.lime : T.pink) : T.muted }}>
+                              {budget > 0 ? `${variance >= 0 ? '+' : ''}Rs ${Math.round(variance).toLocaleString()} saved` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', color: T.muted }}>
+                              {pct !== null ? `${pct.toFixed(0)}%` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right' }}>
+                              {budget > 0 ? (
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99,
+                                  background: ragBg(actual, budget), color: ragColor(actual, budget) }}>
+                                  {overBudget ? '⚠ Over' : '✓ On track'}
+                                </span>
+                              ) : <span style={{ color: T.muted, fontSize: 11 }}>No budget</span>}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {/* Expense rows */}
+                      {data.expenses.map((e, i) => {
+                        const actual     = e.total
+                        const budget     = monthBudget[e.category] || 0
+                        const variance   = budget - actual
+                        const pct        = budget > 0 ? (actual / budget * 100) : null
+                        const overBudget = budget > 0 && actual > budget
+                        return (
+                          <tr key={i} className="dn-tr">
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.muted }}>{e.category}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.muted, textAlign: 'right', fontFamily: T.mono }}>{budget > 0 ? `Rs ${budget.toLocaleString()}` : '—'}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.text, textAlign: 'right', fontFamily: T.mono }}>Rs {Math.round(actual).toLocaleString()}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', fontFamily: T.mono, color: budget > 0 ? (!overBudget ? T.lime : T.pink) : T.muted }}>
+                              {budget > 0 ? `${variance >= 0 ? 'Rs ' + Math.round(variance).toLocaleString() + ' left' : '(Rs ' + Math.round(Math.abs(variance)).toLocaleString() + ' over)'}` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right', color: T.muted }}>
+                              {pct !== null ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                                  <div style={{ width: 60, height: 4, background: T.faint, borderRadius: 99, overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: ragColor(actual, budget), borderRadius: 99, transition: 'width 0.3s' }} />
+                                  </div>
+                                  {pct.toFixed(0)}%
+                                </div>
+                              ) : '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right' }}>
+                              {budget > 0 ? (
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99,
+                                  background: ragBg(actual, budget), color: ragColor(actual, budget) }}>
+                                  {overBudget ? '⚠ Over' : pct > 85 ? '⚡ Near limit' : '✓ On track'}
+                                </span>
+                              ) : <span style={{ color: T.muted, fontSize: 11 }}>No budget</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {Object.keys(monthBudget).length === 0 && (
+                  <div style={{ padding: '24px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 13, color: T.muted, marginBottom: 12 }}>No budget set for {monthLabel}.</div>
+                    <Btn onClick={openBudgetEdit}>⚙ Set Budget for This Month</Btn>
+                  </div>
+                )}
+              </Card>
             </>
           )
         )}
@@ -281,6 +613,32 @@ export default function AdminPL() {
         )}
 
       </PageContent>
+
+      {/* ── Budget Edit Modal ── */}
+      {budgetEdit && (
+        <Modal title={`Set Monthly Budget — ${monthLabel}`} onClose={() => setBudgetEdit(false)} width={480}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 4 }}>
+              Set budget targets for this month. Stored locally in your browser.
+            </div>
+            {Object.entries(budgetDraft).map(([cat, val]) => (
+              <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'center' }}>
+                <div style={{ fontSize: 13, color: T.text, fontWeight: 600 }}>{cat}</div>
+                <Input
+                  type="number"
+                  placeholder="Leave blank for no budget"
+                  value={val}
+                  onChange={e => setBudgetDraft(d => ({ ...d, [cat]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+            <Btn variant="ghost" onClick={() => setBudgetEdit(false)}>Cancel</Btn>
+            <Btn onClick={saveBudgetEdit}>Save Budget</Btn>
+          </div>
+        </Modal>
+      )}
 
       {drill === 'cogs'    && data && <CogsDrillDown    data={data} monthLabel={monthLabel} onClose={() => setDrill(null)} />}
       {drill === 'revenue' && data && <RevenueDrillDown month={month} monthLabel={monthLabel} onClose={() => setDrill(null)} />}

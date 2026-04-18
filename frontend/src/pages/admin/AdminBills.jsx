@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import adminApi from '../../lib/adminApi'
+import { downloadCsv, fmtDate } from '../../lib/csvExport'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard,
   Card, CardHeader, Table, Tr, Td, ExpandedRow,
@@ -240,6 +241,191 @@ export default function AdminBills() {
     catch (e) { alert(e.response?.data?.error || 'Cannot delete this bill') }
   }
 
+  function exportCsv() {
+    const rows = [
+      ['Bill #', 'Supplier', 'Bill Date', 'Due Date', 'Total (Rs)', 'Paid (Rs)', 'Outstanding (Rs)', 'Status'],
+      ...bills.map(b => [
+        b.bill_number,
+        b.supplier_name || '',
+        fmtDate(b.bill_date),
+        fmtDate(b.due_date),
+        Number(b.total).toFixed(2),
+        Number(b.amount_paid || 0).toFixed(2),
+        Number(b.total - (b.amount_paid || 0)).toFixed(2),
+        b.status,
+      ]),
+    ]
+    downloadCsv(rows, `bills-${new Date().toISOString().slice(0,10)}.csv`)
+  }
+
+  // ── Bill PDF export (browser print, no server) ───────────────────────────────
+  async function printBill(bill) {
+    // Fetch full bill detail (items + payments)
+    let detail = null
+    try {
+      const res = await adminApi.get(`/bills/${bill.id}`)
+      detail = res.data
+    } catch { detail = bill }
+
+    const supplier = suppliers.find(s => String(s.id) === String(bill.supplier_id)) || {}
+    const items    = detail.items || []
+    const payments = detail.payments || []
+    const owed     = bill.total - (bill.amount_paid || 0)
+
+    const statusCfg = {
+      unpaid:  { label: 'UNPAID',  color: '#dc2626' },
+      partial: { label: 'PARTIAL', color: '#d97706' },
+      paid:    { label: 'PAID',    color: '#16a34a' },
+    }
+    const st = statusCfg[bill.status] || statusCfg.unpaid
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Bill ${bill.bill_number}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #fff; color: #1a1a2e; padding: 40px; font-size: 13px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 2px solid #e0e0f0; }
+    .company-name { font-size: 22px; font-weight: 900; }
+    .company-name span { color: #ff2d78; }
+    .company-sub { color: #6b6b85; font-size: 11px; margin-top: 2px; }
+    .doc-title { font-size: 28px; font-weight: 900; color: #1a1a2e; text-align: right; }
+    .doc-meta  { text-align: right; margin-top: 8px; font-size: 12px; color: #6b6b85; line-height: 2; }
+    .status-badge { display: inline-block; padding: 3px 14px; border-radius: 99px; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: ${st.color}; border: 2px solid ${st.color}; background: ${st.color}18; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
+    .info-box { background: #f8f8ff; border: 1px solid #e8e8f8; border-radius: 10px; padding: 16px; }
+    .info-label { font-size: 9px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: #9090b0; margin-bottom: 8px; }
+    .info-value { font-size: 13px; color: #1a1a2e; font-weight: 600; line-height: 1.7; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #f0f0f8; }
+    thead th { padding: 10px 12px; text-align: left; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b85; }
+    thead th:last-child { text-align: right; }
+    tbody td { padding: 11px 12px; border-bottom: 1px solid #f0f0f8; font-size: 13px; }
+    tbody td:last-child { text-align: right; font-weight: 700; }
+    .total-row { background: #f8f8ff; font-weight: 700; font-size: 14px; }
+    .total-row td { padding: 12px; border-top: 2px solid #e0e0f0; }
+    .section-title { font-size: 9px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: #ff2d78; margin: 24px 0 10px; }
+    .payment-row { display: flex; justify-content: space-between; padding: 9px 12px; border-bottom: 1px solid #f0f0f8; font-size: 12px; }
+    .payment-row .amount { font-weight: 700; color: #16a34a; }
+    .payment-row.voided .amount { text-decoration: line-through; color: #9090b0; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 24px; }
+    .summary-item { text-align: center; padding: 14px; background: #f8f8ff; border-radius: 10px; border: 1px solid #e0e0f0; }
+    .summary-item .val { font-size: 18px; font-weight: 900; margin-top: 4px; }
+    .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e0e0f0; font-size: 11px; color: #aaa; display: flex; justify-content: space-between; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="company-name">D<span>&</span>N Accessories</div>
+      <div class="company-sub">Jewellery & Accessories · Sri Lanka</div>
+      <div style="margin-top:12px;"><span class="status-badge">${st.label}</span></div>
+    </div>
+    <div>
+      <div class="doc-title">PURCHASE BILL</div>
+      <div class="doc-meta">
+        Bill #: <strong style="color:#1a1a2e;">${bill.bill_number}</strong><br>
+        Bill Date: ${bill.bill_date || '—'}<br>
+        Due Date: ${bill.due_date || '—'}<br>
+        Printed: ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}
+      </div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="info-box">
+      <div class="info-label">Supplier</div>
+      <div class="info-value">
+        ${bill.supplier_name || supplier.name || 'No supplier specified'}<br>
+        ${supplier.phone ? `<span style="color:#6b6b85;font-size:12px;">📞 ${supplier.phone}</span><br>` : ''}
+        ${supplier.email ? `<span style="color:#6b6b85;font-size:12px;">✉ ${supplier.email}</span>` : ''}
+      </div>
+    </div>
+    <div class="info-box">
+      <div class="info-label">Bill Details</div>
+      <div class="info-value">
+        Reference: <strong>${bill.bill_number}</strong><br>
+        ${bill.notes ? `Notes: ${bill.notes}<br>` : ''}
+        Status: <span style="color:${st.color};font-weight:800;">${st.label}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Line Items</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>Material</th><th>Quantity</th><th>Unit Cost (Rs)</th><th>Total (Rs)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map((item, i) => `
+        <tr>
+          <td style="color:#9090b0;">${i + 1}</td>
+          <td style="font-weight:600;">${item.material_name || '—'}</td>
+          <td style="color:#6b6b85;">${item.qty} ${item.unit || ''}</td>
+          <td style="color:#6b6b85;">Rs ${Number(item.unit_cost).toFixed(2)}</td>
+          <td>Rs ${Number(item.total || item.qty * item.unit_cost).toLocaleString()}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="4" style="text-align:right;padding-right:16px;font-weight:800;">BILL TOTAL</td>
+        <td style="font-size:16px;font-weight:900;color:#ff2d78;">Rs ${Number(bill.total).toLocaleString()}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  ${payments.length > 0 ? `
+  <div class="section-title">Payment History</div>
+  <div style="border:1px solid #e8e8f8;border-radius:10px;overflow:hidden;">
+    ${payments.map(p => `
+      <div class="payment-row ${p.voided ? 'voided' : ''}">
+        <div>
+          <div class="amount">Rs ${Number(p.amount).toLocaleString()}</div>
+          <div style="color:#9090b0;font-size:11px;margin-top:2px;">${p.bank_account || p.payment_method || '—'}${p.void_reason ? ` · Voided: ${p.void_reason}` : ''}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="color:#6b6b85;">${p.payment_date || '—'}</div>
+          ${p.voided ? '<div style="font-size:10px;font-weight:800;color:#dc2626;margin-top:2px;">VOIDED</div>' : ''}
+        </div>
+      </div>
+    `).join('')}
+  </div>` : ''}
+
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b6b85;">Bill Total</div>
+      <div class="val" style="color:#1a1a2e;">Rs ${Number(bill.total).toLocaleString()}</div>
+    </div>
+    <div class="summary-item">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b6b85;">Amount Paid</div>
+      <div class="val" style="color:#16a34a;">Rs ${Number(bill.amount_paid || 0).toLocaleString()}</div>
+    </div>
+    <div class="summary-item">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b6b85;">Outstanding</div>
+      <div class="val" style="color:${owed > 0 ? '#dc2626' : '#16a34a'};">Rs ${Number(owed).toLocaleString()}</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>D&amp;N Accessories · Purchase Bill ${bill.bill_number}</span>
+    <span>Generated ${new Date().toLocaleDateString()}</span>
+  </div>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
+    win.onload = () => { win.focus(); win.print() }
+  }
+
   const totalBilled = bills.reduce((s, b) => s + b.total, 0)
   const totalPaid   = bills.reduce((s, b) => s + (b.amount_paid || 0), 0)
   const outstanding = totalBilled - totalPaid
@@ -256,7 +442,12 @@ export default function AdminBills() {
       <PageHeader
         title="Bills"
         subtitle="Supplier purchase bills"
-        action={<Btn onClick={() => { setForm(emptyForm()); setBillImg(null); setImgPrev(null); setShowAddSupplier(false); setAddMatIdx(null); setModal('new') }}>+ New Bill</Btn>}
+        action={
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn size="sm" variant="ghost" onClick={exportCsv} disabled={bills.length === 0}>⬇ CSV</Btn>
+            <Btn onClick={() => { setForm(emptyForm()); setBillImg(null); setImgPrev(null); setShowAddSupplier(false); setAddMatIdx(null); setModal('new') }}>+ New Bill</Btn>
+          </div>
+        }
       />
       <PageContent>
         <KpiGrid>
@@ -294,6 +485,7 @@ export default function AdminBills() {
                       <Td onClick={e => e.stopPropagation()}>
                         <div style={{ display:'flex', gap:6 }}>
                           <Btn size="sm" variant="ghost" onClick={() => openEditBill(b)}>Edit</Btn>
+                          <Btn size="sm" variant="ghost" onClick={() => printBill(b)}>⬇ PDF</Btn>
                           {b.status !== 'paid' && (
                             <Btn size="sm" onClick={() => { setPayForm({ amount:'', payment_date:today(), payment_method:'bank', bank_account:'BOC', notes:'' }); setModal(b) }}>Pay</Btn>
                           )}

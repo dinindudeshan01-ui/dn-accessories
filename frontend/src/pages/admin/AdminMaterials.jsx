@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import adminApi from '../../lib/adminApi'
+import { downloadCsv } from '../../lib/csvExport'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard,
   Card, CardHeader, Table, Tr, Td,
@@ -91,12 +92,31 @@ export default function AdminMaterials() {
     critical: { label:'Out', color:T.pink, bg:'rgba(255,45,120,0.12)' },
   }
 
+  function exportCsv() {
+    const rows = [
+      ['Name', 'Unit', 'Stock', 'Avg Cost (Rs)', 'Stock Value (Rs)', 'Reorder Level'],
+      ...materials.map(m => [
+        m.name, m.unit,
+        Number(m.stock || 0).toFixed(2),
+        Number(m.avg_cost || 0).toFixed(2),
+        (Number(m.stock || 0) * Number(m.avg_cost || 0)).toFixed(2),
+        m.reorder_level || '',
+      ]),
+    ]
+    downloadCsv(rows, `materials-${new Date().toISOString().slice(0,10)}.csv`)
+  }
+
   return (
     <>
       <PageHeader
         title="Materials"
         subtitle="Raw material inventory"
-        action={<Btn onClick={openAdd}>+ Add Material</Btn>}
+        action={
+          <div style={{ display:'flex', gap:8 }}>
+            <Btn size="sm" variant="ghost" onClick={exportCsv} disabled={materials.length === 0}>⬇ CSV</Btn>
+            <Btn onClick={openAdd}>+ Add Material</Btn>
+          </div>
+        }
       />
       <PageContent>
 

@@ -1,7 +1,9 @@
 // src/pages/admin/AdminCustomers.jsx — v2: LTV + VIP
 
+// Phase 4: + CSV export
 import React, { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
+import { downloadCsv, fmtDate } from '../../lib/csvExport'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard, Card, CardHeader,
   Table, Tr, Td, Btn, Spinner, tokens as T
@@ -67,9 +69,25 @@ export default function AdminCustomers() {
       return 0
     })
 
+  function exportCsv() {
+    const rows = [
+      ['Name', 'Phone', 'City', 'NIC', 'Orders', 'Total Spent (Rs)', 'Avg Order (Rs)', 'Last Order'],
+      ...filtered.map(c => [
+        c.full_name || '', c.phone1 || '', c.city || '', c.nic || '',
+        c.order_count || 0,
+        Math.round(c.total_spent || 0),
+        Math.round(c.avg_order_value || 0),
+        fmtDate(c.last_order),
+      ]),
+    ]
+    downloadCsv(rows, `customers-${new Date().toISOString().slice(0,10)}.csv`)
+  }
+
   return (
     <>
-      <PageHeader title="Customers" subtitle="Lifetime value & order history" />
+      <PageHeader title="Customers" subtitle="Lifetime value & order history"
+        action={<Btn size="sm" variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>⬇ CSV</Btn>}
+      />
       <PageContent>
 
         <KpiGrid>

@@ -1,7 +1,9 @@
 // src/pages/admin/AdminExpenses.jsx
+// Phase 4: + CSV export
 
 import { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
+import { downloadCsv, fmtDate } from '../../lib/csvExport'
 import {
   PageHeader, PageContent, Card, CardHeader, Table, Tr, Td,
   Btn, Input, Select, Spinner, CatPill, Modal, ModalFooter, tokens as T
@@ -75,15 +77,27 @@ export default function AdminExpenses() {
   const total  = expenses.reduce((s,e) => s + e.amount, 0)
   const months = Array.from({length:12},(_,i) => { const d=new Date(); d.setMonth(d.getMonth()-i); return d.toISOString().slice(0,7) })
 
+  function exportCsv() {
+    const rows = [
+      ['Date', 'Description', 'Category', 'Amount (Rs)'],
+      ...expenses.map(e => [fmtDate(e.date), e.description, e.category, e.amount]),
+      ['', '', 'TOTAL', total],
+    ]
+    downloadCsv(rows, `expenses-${month}.csv`)
+  }
+
   return (
     <>
       <PageHeader
         title="Expenses"
         subtitle="Track outgoing costs"
         action={
-          <Select value={month} onChange={e => setMonth(e.target.value)} style={{ width:'auto', padding:'7px 12px', fontSize:12 }}>
-            {months.map(m => <option key={m} value={m}>{new Date(m+'-01').toLocaleDateString('en-US',{year:'numeric',month:'long'})}</option>)}
-          </Select>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <Btn size="sm" variant="ghost" onClick={exportCsv} disabled={expenses.length === 0}>⬇ CSV</Btn>
+            <Select value={month} onChange={e => setMonth(e.target.value)} style={{ width:'auto', padding:'7px 12px', fontSize:12 }}>
+              {months.map(m => <option key={m} value={m}>{new Date(m+'-01').toLocaleDateString('en-US',{year:'numeric',month:'long'})}</option>)}
+            </Select>
+          </div>
         }
       />
       <PageContent>

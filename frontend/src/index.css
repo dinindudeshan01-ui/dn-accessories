@@ -41,3 +41,119 @@ button { cursor: pointer; border: none; font-family: var(--sans); }
   .newsletter-form input,
   .newsletter-form button { width: 100% !important; }
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   ADMIN LIGHT MODE
+   Applied when <html data-admin-theme="light"> is set.
+   The admin panel uses inline styles with hardcoded dark tokens —
+   this CSS layer overrides the key surface/background colours so
+   the admin becomes readable in light mode without touching every
+   component file.
+───────────────────────────────────────────────────────────────── */
+
+[data-admin-theme="light"] .dn-admin-root,
+[data-admin-theme="light"] body {
+  background: #f4f4f8 !important;
+}
+
+/* Sidebar */
+[data-admin-theme="light"] aside {
+  background: #ffffff !important;
+  border-color: rgba(0,0,0,0.08) !important;
+}
+
+/* All dark surface cards */
+[data-admin-theme="light"] [style*="background: rgb(8, 8, 16)"],
+[data-admin-theme="light"] [style*="background: #080810"],
+[data-admin-theme="light"] [style*="background:#080810"] {
+  background: #f4f4f8 !important;
+}
+[data-admin-theme="light"] [style*="background: rgb(15, 15, 26)"],
+[data-admin-theme="light"] [style*="background: #0f0f1a"],
+[data-admin-theme="light"] [style*="background:#0f0f1a"] {
+  background: #ffffff !important;
+}
+[data-admin-theme="light"] [style*="background: rgb(19, 19, 31)"],
+[data-admin-theme="light"] [style*="background: #13131f"],
+[data-admin-theme="light"] [style*="background:#13131f"] {
+  background: #f8f8fc !important;
+}
+[data-admin-theme="light"] [style*="background: rgb(10, 10, 20)"],
+[data-admin-theme="light"] [style*="background: #0a0a14"],
+[data-admin-theme="light"] [style*="background:#0a0a14"] {
+  background: #ffffff !important;
+}
+
+/* Text tokens */
+[data-admin-theme="light"] [style*="color: rgb(240, 240, 248)"],
+[data-admin-theme="light"] [style*="color: #f0f0f8"],
+[data-admin-theme="light"] [style*="color:#f0f0f8"] {
+  color: #18182c !important;
+}
+[data-admin-theme="light"] [style*="color: rgb(107, 107, 133)"],
+[data-admin-theme="light"] [style*="color: #6b6b85"],
+[data-admin-theme="light"] [style*="color:#6b6b85"] {
+  color: #5a5a78 !important;
+}
+
+/* Borders */
+[data-admin-theme="light"] [style*="border: 1px solid rgba(255, 255, 255, 0.07)"],
+[data-admin-theme="light"] [style*="border-right: 1px solid rgba(255, 255, 255, 0.07)"],
+[data-admin-theme="light"] [style*="border-bottom: 1px solid rgba(255, 255, 255, 0.07)"],
+[data-admin-theme="light"] [style*="border-top: 1px solid rgba(255, 255, 255, 0.07)"] {
+  border-color: rgba(0,0,0,0.08) !important;
+}
+
+/* Faint surfaces */
+[data-admin-theme="light"] [style*="background: rgb(20, 20, 36)"],
+[data-admin-theme="light"] [style*="background: #141424"],
+[data-admin-theme="light"] [style*="background:#141424"] {
+  background: #eeeef4 !important;
+}
+[data-admin-theme="light"] [style*="background: rgb(42, 42, 61)"],
+[data-admin-theme="light"] [style*="background: #2a2a3d"],
+[data-admin-theme="light"] [style*="background:#2a2a3d"] {
+  background: #dcdce8 !important;
+}
+
+/* Nav links in light mode */
+[data-admin-theme="light"] .dn-nav-link {
+  color: #5a5a78 !important;
+}
+[data-admin-theme="light"] .dn-nav-link:hover {
+  color: #18182c !important;
+  background: rgba(0,0,0,0.04) !important;
+}
+[data-admin-theme="light"] .dn-nav-link.active {
+  color: #ff2d78 !important;
+  background: rgba(255,45,120,0.08) !important;
+}
+
+/* Table rows */
+[data-admin-theme="light"] .dn-tr:hover > td {
+  background: rgba(255,45,120,0.03) !important;
+}
+
+/* Inputs */
+[data-admin-theme="light"] .dn-input,
+[data-admin-theme="light"] .dn-select {
+  background: #ffffff !important;
+  color: #18182c !important;
+  border-color: rgba(0,0,0,0.15) !important;
+}
+
+/* Scrollbar */
+[data-admin-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #c8c8d8 !important;
+}
+
+/* Bottom tabs in light mode */
+[data-admin-theme="light"] .dn-bottom-tabs {
+  background: #ffffff !important;
+  border-color: rgba(0,0,0,0.08) !important;
+}
+
+/* Modal overlay gets slightly lighter scrim */
+[data-admin-theme="light"] .dn-modal-overlay {
+  background: rgba(0,0,0,0.4) !important;
+}
