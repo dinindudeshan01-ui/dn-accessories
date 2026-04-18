@@ -12,26 +12,26 @@ cloudinary.config({
 })
 
 // ── Multer — memory storage (no disk) ────────────────────────
+const ALLOWED_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf']
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|pdf|webp/
-    const ext = file.originalname.split('.').pop().toLowerCase()
-    if (allowed.test(ext)) return cb(null, true)
+    if (ALLOWED_MIMES.includes(file.mimetype)) return cb(null, true)
     cb(new Error('Only images (JPG, PNG, WEBP) and PDF allowed'))
   }
 })
 
 // ── Helper: upload buffer to Cloudinary ──────────────────────
-function uploadToCloudinary(buffer, filename) {
+function uploadToCloudinary(buffer) {
   return new Promise((resolve, reject) => {
     const uniqueName = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     const stream = cloudinary.uploader.upload_stream(
       {
         folder:        'dn-accessories/slips',
         public_id:     uniqueName,
-        resource_type: 'auto',   // handles both images and PDFs
+        resource_type: 'auto',
       },
       (error, result) => {
         if (error) return reject(error)
@@ -60,8 +60,7 @@ router.post('/', upload.single('slip'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Payment slip is required' })
 
-    // Upload slip to Cloudinary — get back a permanent URL
-    const slipUrl = await uploadToCloudinary(req.file.buffer, req.file.originalname)
+    const slipUrl = await uploadToCloudinary(req.file.buffer)
 
     const result = await db.prepare(`
       INSERT INTO orders (full_name, nic, phone1, phone2, address, city, total, items_json, slip_path, bank_used, status)
