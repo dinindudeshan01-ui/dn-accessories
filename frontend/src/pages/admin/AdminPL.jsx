@@ -2,17 +2,17 @@ import { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard,
-  Card, Select, Spinner, Modal, Btn,
+  Card, CardHeader, Select, Spinner, Modal, Btn,
   PLSection, PLRow, PLTotal, NetProfitRow, tokens as T
 } from '../../components/admin/AdminUI'
 
 export default function AdminPL() {
-  const [data,      setData]      = useState(null)
-  const [month,     setMonth]     = useState(new Date().toISOString().slice(0, 7))
-  const [loading,   setLoading]   = useState(true)
-  const [drill,     setDrill]     = useState(null)
-  const [tab,       setTab]       = useState('statement') // 'statement' | 'compare'
-  const [compareData, setCompareData] = useState(null)
+  const [data,         setData]         = useState(null)
+  const [month,        setMonth]        = useState(new Date().toISOString().slice(0, 7))
+  const [loading,      setLoading]      = useState(true)
+  const [drill,        setDrill]        = useState(null)
+  const [tab,          setTab]          = useState('statement')
+  const [compareData,  setCompareData]  = useState(null)
   const [compareMonth, setCompareMonth] = useState(() => {
     const d = new Date(); d.setMonth(d.getMonth() - 1)
     return d.toISOString().slice(0, 7)
@@ -46,7 +46,7 @@ export default function AdminPL() {
     return d.toISOString().slice(0, 7)
   })
 
-  const fmtMonth = m => new Date(m + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+  const fmtMonth  = m => new Date(m + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
   const monthLabel = fmtMonth(month)
 
   return (
@@ -62,7 +62,8 @@ export default function AdminPL() {
       />
 
       <PageContent>
-        {/* Tab switcher */}
+
+        {/* ── Tab switcher ── */}
         <div style={{ display: 'flex', gap: 2, marginBottom: 20, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 4, width: 'fit-content' }}>
           {[{ k: 'statement', l: 'Income Statement' }, { k: 'compare', l: 'Compare Months' }].map(t => (
             <button key={t.k} onClick={() => setTab(t.k)} style={{
@@ -99,7 +100,9 @@ export default function AdminPL() {
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {data.costVariances.map((v, i) => (
-                      <span key={i} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 99, background: v.variance_pct > 0 ? 'rgba(255,45,120,0.12)' : 'rgba(184,255,60,0.1)', color: v.variance_pct > 0 ? T.pink : T.lime, fontWeight: 600 }}>
+                      <span key={i} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 99,
+                        background: v.variance_pct > 0 ? 'rgba(255,45,120,0.12)' : 'rgba(184,255,60,0.1)',
+                        color: v.variance_pct > 0 ? T.pink : T.lime, fontWeight: 600 }}>
                         {v.name} {v.variance_pct > 0 ? '+' : ''}{v.variance_pct}%
                       </span>
                     ))}
@@ -123,6 +126,7 @@ export default function AdminPL() {
                 </div>
               )}
 
+              {/* Income statement card */}
               <Card>
                 <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Income Statement</span>
@@ -174,9 +178,9 @@ export default function AdminPL() {
                       </thead>
                       <tbody>
                         {data.cogsByProduct.map((p, i) => {
-                          const rev         = (Number(p.selling_price) || 0) * (Number(p.total_qty) || 0)
-                          const grossProfit  = rev - Number(p.total_cost)
-                          const margin      = rev > 0 ? (grossProfit / rev) * 100 : null
+                          const rev        = (Number(p.selling_price) || 0) * (Number(p.total_qty) || 0)
+                          const grossProfit = rev - Number(p.total_cost)
+                          const margin     = rev > 0 ? (grossProfit / rev) * 100 : null
                           const marginColor = margin === null ? T.muted : margin < 20 ? T.pink : margin < 40 ? T.gold : T.lime
                           return (
                             <tr key={i} className="dn-tr">
@@ -226,7 +230,7 @@ export default function AdminPL() {
                 <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Month Comparison</span>
                   <div style={{ display: 'flex', gap: 20, fontSize: 12 }}>
-                    <span style={{ color: T.cyan, fontWeight: 700 }}>{fmtMonth(month)}</span>
+                    <span style={{ color: T.cyan,   fontWeight: 700 }}>{fmtMonth(month)}</span>
                     <span style={{ color: T.muted }}>vs</span>
                     <span style={{ color: T.purple, fontWeight: 700 }}>{fmtMonth(compareMonth)}</span>
                   </div>
@@ -242,29 +246,28 @@ export default function AdminPL() {
                     </thead>
                     <tbody>
                       {[
-                        { label: 'Revenue',        a: compareData.a.revenue,       b: compareData.b.revenue,       fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
-                        { label: 'COGS',            a: compareData.a.cogs,          b: compareData.b.cogs,          fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: false },
-                        { label: 'Gross Profit',    a: compareData.a.grossProfit,   b: compareData.b.grossProfit,   fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
-                        { label: 'Gross Margin %',  a: compareData.a.grossMargin,   b: compareData.b.grossMargin,   fmt: v => `${v.toFixed(1)}%`,                     up: true  },
-                        { label: 'Expenses',        a: compareData.a.totalExpenses, b: compareData.b.totalExpenses, fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: false },
-                        { label: 'Net Profit',      a: compareData.a.netProfit,     b: compareData.b.netProfit,     fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
-                        { label: 'Net Margin %',    a: compareData.a.netMargin,     b: compareData.b.netMargin,     fmt: v => `${v.toFixed(1)}%`,                     up: true  },
+                        { label: 'Revenue',       a: compareData.a.revenue,       b: compareData.b.revenue,       fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
+                        { label: 'COGS',           a: compareData.a.cogs,          b: compareData.b.cogs,          fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: false },
+                        { label: 'Gross Profit',   a: compareData.a.grossProfit,   b: compareData.b.grossProfit,   fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
+                        { label: 'Gross Margin %', a: compareData.a.grossMargin,   b: compareData.b.grossMargin,   fmt: v => `${v.toFixed(1)}%`,                     up: true  },
+                        { label: 'Expenses',       a: compareData.a.totalExpenses, b: compareData.b.totalExpenses, fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: false },
+                        { label: 'Net Profit',     a: compareData.a.netProfit,     b: compareData.b.netProfit,     fmt: v => `Rs ${Math.round(v).toLocaleString()}`, up: true  },
+                        { label: 'Net Margin %',   a: compareData.a.netMargin,     b: compareData.b.netMargin,     fmt: v => `${v.toFixed(1)}%`,                     up: true  },
                       ].map((row, i) => {
-                        const diff    = row.a - row.b
-                        const pct     = row.b !== 0 ? ((diff / Math.abs(row.b)) * 100) : null
-                        const isGood  = row.up ? diff >= 0 : diff <= 0
-                        const isLast  = i === 6
+                        const diff   = row.a - row.b
+                        const pct    = row.b !== 0 ? ((diff / Math.abs(row.b)) * 100) : null
+                        const isGood = row.up ? diff >= 0 : diff <= 0
+                        const isLast = i === 6
                         return (
                           <tr key={i} className="dn-tr" style={{ background: isLast ? (compareData.a.netProfit >= 0 ? 'rgba(184,255,60,0.04)' : 'rgba(255,45,120,0.04)') : 'transparent' }}>
                             <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: isLast ? T.text : T.muted, fontWeight: isLast ? 900 : 400 }}>{row.label}</td>
-                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.cyan, textAlign: 'right', fontFamily: T.mono, fontWeight: isLast ? 900 : 400 }}>{row.fmt(row.a)}</td>
+                            <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.cyan,   textAlign: 'right', fontFamily: T.mono, fontWeight: isLast ? 900 : 400 }}>{row.fmt(row.a)}</td>
                             <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, color: T.purple, textAlign: 'right', fontFamily: T.mono }}>{row.fmt(row.b)}</td>
                             <td style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, textAlign: 'right' }}>
-                              {pct !== null ? (
-                                <span style={{ fontSize: 11, fontWeight: 700, color: isGood ? T.lime : T.pink }}>
-                                  {diff >= 0 ? '+' : ''}{pct.toFixed(1)}%
-                                </span>
-                              ) : <span style={{ color: T.muted }}>—</span>}
+                              {pct !== null
+                                ? <span style={{ fontSize: 11, fontWeight: 700, color: isGood ? T.lime : T.pink }}>{diff >= 0 ? '+' : ''}{pct.toFixed(1)}%</span>
+                                : <span style={{ color: T.muted }}>—</span>
+                              }
                             </td>
                           </tr>
                         )
@@ -276,6 +279,7 @@ export default function AdminPL() {
             ) : null}
           </>
         )}
+
       </PageContent>
 
       {drill === 'cogs'    && data && <CogsDrillDown    data={data} monthLabel={monthLabel} onClose={() => setDrill(null)} />}
@@ -284,14 +288,7 @@ export default function AdminPL() {
   )
 }
 
-function CardHeader({ title }) {
-  return (
-    <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}` }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{title}</span>
-    </div>
-  )
-}
-
+// ── Clickable P&L Row ─────────────────────────────────────────
 function ClickablePLRow({ label, value, positive, onClick, hint }) {
   const [hov, setHov] = useState(false)
   const color = positive ? T.lime : value >= 0 ? T.text : T.pink
@@ -309,6 +306,7 @@ function ClickablePLRow({ label, value, positive, onClick, hint }) {
   )
 }
 
+// ── COGS Drill-down Modal ─────────────────────────────────────
 function CogsDrillDown({ data, monthLabel, onClose }) {
   const [view, setView] = useState('product')
   return (
@@ -391,8 +389,9 @@ function CogsDrillDown({ data, monthLabel, onClose }) {
   )
 }
 
+// ── Revenue Drill-down Modal ──────────────────────────────────
 function RevenueDrillDown({ month, monthLabel, onClose }) {
-  const [orders, setOrders]   = useState([])
+  const [orders,  setOrders]  = useState([])
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     Promise.all([
@@ -422,7 +421,9 @@ function RevenueDrillDown({ month, monthLabel, onClose }) {
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontFamily: 'monospace', color: T.gold, fontWeight: 700 }}>{o.reference}</span>
-                      <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 99, background: o.status === 'paid' ? 'rgba(184,255,60,0.12)' : 'rgba(0,229,255,0.1)', color: o.status === 'paid' ? T.lime : T.cyan, textTransform: 'uppercase' }}>{o.status}</span>
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 99,
+                        background: o.status === 'paid' ? 'rgba(184,255,60,0.12)' : 'rgba(0,229,255,0.1)',
+                        color: o.status === 'paid' ? T.lime : T.cyan, textTransform: 'uppercase' }}>{o.status}</span>
                     </div>
                     <div style={{ color: T.muted, marginTop: 2 }}>{o.full_name} · {o.items?.length || 0} items</div>
                   </div>

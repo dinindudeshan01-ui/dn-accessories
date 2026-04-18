@@ -80,8 +80,6 @@ router.get('/pl', adminAuth, async (req, res) => {
       : await db.prepare(`SELECT COALESCE(SUM(line_cost), 0) as total FROM order_cogs ${cogsFilter}`).get()
     const cogs = Number(cogsRow?.total ?? 0)
 
-    // ── COGS + gross margin by product ────────────────────────
-    // Joins products table to get selling price for margin calculation
     const cogsByProduct = month
       ? await db.prepare(`
           SELECT
@@ -133,8 +131,6 @@ router.get('/pl', adminAuth, async (req, res) => {
       : await db.prepare(`SELECT category, COALESCE(SUM(amount), 0) as total FROM expenses GROUP BY category`).all()
     const totalExpenses = expenseRows.reduce((s, r) => s + Number(r.total ?? 0), 0)
 
-    // ── Closing stock valuation ───────────────────────────────
-    // Current qty × avg_cost per material = value of unsold stock
     const stockValuation = await db.prepare(`
       SELECT
         COALESCE(SUM(qty_in_stock * avg_cost), 0) as total_value,
@@ -143,13 +139,9 @@ router.get('/pl', adminAuth, async (req, res) => {
       FROM materials
     `).get()
 
-    // ── Material cost variances (>10% change in last 2 bills) ─
     const costVariances = await db.prepare(`
       SELECT
-        m.id,
-        m.name,
-        m.unit,
-        m.avg_cost,
+        m.id, m.name, m.unit, m.avg_cost,
         recent.unit_cost as last_purchase_cost,
         ROUND(((recent.unit_cost - m.avg_cost) / NULLIF(m.avg_cost, 0)) * 100, 1) as variance_pct
       FROM materials m
@@ -209,9 +201,9 @@ router.get('/pl/compare', adminAuth, async (req, res) => {
       const revRow  = await db.prepare(`SELECT COALESCE(SUM(total),0) as total FROM orders WHERE status IN ('paid','shipped') AND strftime('%Y-%m', created_at) = ?`).get(month)
       const cogsRow = await db.prepare(`SELECT COALESCE(SUM(line_cost),0) as total FROM order_cogs WHERE strftime('%Y-%m', date) = ?`).get(month)
       const expRow  = await db.prepare(`SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE strftime('%Y-%m', date) = ?`).get(month)
-      const revenue      = Number(revRow?.total  ?? 0)
-      const cogs         = Number(cogsRow?.total ?? 0)
-      const totalExpenses= Number(expRow?.total  ?? 0)
+      const revenue       = Number(revRow?.total  ?? 0)
+      const cogs          = Number(cogsRow?.total ?? 0)
+      const totalExpenses = Number(expRow?.total  ?? 0)
       return {
         month,
         revenue,
@@ -233,50 +225,60 @@ router.get('/pl/compare', adminAuth, async (req, res) => {
 })
 
 // ── CASH FLOW ─────────────────────────────────────────────────
-// Cash basis (actual money in/out) — different from accrual P&L
-// Cash In  = order payments received (orders marked paid/shipped)
-// Cash Out = bill payments made + expenses paid
 router.get('/cashflow', adminAuth, async (req, res) => {
   try {
     const { month } = req.query
-    const mFilter = month ? `AND strftime('%Y-%m', %COL%) = '${month}'` : ''
 
     // ── Cash in: orders confirmed this period ─────────────────
-    const cashInRow = await db.prepare(`
-      SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count
-      FROM orders
-      WHERE status IN ('paid','shipped')
-      ${month ? `AND strftime('%Y-%m', created_at) = ?` : ''}
-    `)[month ? 'get' : 'get'](month ? month : undefined)
+    const cashInRow = month
+      ? await db.prepare(`
+          SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count
+          FROM orders
+          WHERE status IN ('paid','shipped')
+          AND strftime('%Y-%m', created_at) = ?
+        `).get(month)
+      : await db.prepare(`
+          SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count
+          FROM orders
+          WHERE status IN ('paid','shipped')
+        `).get()
     const cashIn = Number(cashInRow?.total ?? 0)
 
     // ── Cash out: bill payments made this period ──────────────
-    const billPayRow = await db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
-      FROM bill_payments
-      WHERE voided = 0
-      ${month ? `AND strftime('%Y-%m', payment_date) = ?` : ''}
-    `)[month ? 'get' : 'get'](month ? month : undefined)
+    const billPayRow = month
+      ? await db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+          FROM bill_payments
+          WHERE voided = 0
+          AND strftime('%Y-%m', payment_date) = ?
+        `).get(month)
+      : await db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+          FROM bill_payments
+          WHERE voided = 0
+        `).get()
     const billPayments = Number(billPayRow?.total ?? 0)
 
     // ── Cash out: expenses this period ────────────────────────
-    const expRow = await db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total
-      FROM expenses
-      ${month ? `WHERE strftime('%Y-%m', date) = ?` : ''}
-    `)[month ? 'get' : 'get'](month ? month : undefined)
+    const expRow = month
+      ? await db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total
+          FROM expenses
+          WHERE strftime('%Y-%m', date) = ?
+        `).get(month)
+      : await db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total
+          FROM expenses
+        `).get()
     const expensesPaid = Number(expRow?.total ?? 0)
 
     const totalCashOut = billPayments + expensesPaid
     const netCashFlow  = cashIn - totalCashOut
 
-    // ── Daily cash flow for chart (last 30 days or this month) ─
+    // ── Daily cash flow for chart ─────────────────────────────
     const daily = month
       ? await db.prepare(`
-          SELECT
-            day,
-            SUM(cash_in)  as cash_in,
-            SUM(cash_out) as cash_out
+          SELECT day, SUM(cash_in) as cash_in, SUM(cash_out) as cash_out
           FROM (
             SELECT strftime('%Y-%m-%d', created_at) as day, total as cash_in, 0 as cash_out
             FROM orders WHERE status IN ('paid','shipped') AND strftime('%Y-%m', created_at) = ?
@@ -290,10 +292,7 @@ router.get('/cashflow', adminAuth, async (req, res) => {
           GROUP BY day ORDER BY day ASC
         `).all(month, month, month)
       : await db.prepare(`
-          SELECT
-            day,
-            SUM(cash_in)  as cash_in,
-            SUM(cash_out) as cash_out
+          SELECT day, SUM(cash_in) as cash_in, SUM(cash_out) as cash_out
           FROM (
             SELECT strftime('%Y-%m-%d', created_at) as day, total as cash_in, 0 as cash_out
             FROM orders WHERE status IN ('paid','shipped') AND created_at >= date('now', '-30 days')
@@ -323,7 +322,7 @@ router.get('/cashflow', adminAuth, async (req, res) => {
       expensesPaid,
       totalCashOut,
       netCashFlow,
-      orderCount:   Number(cashInRow?.count ?? 0),
+      orderCount:    Number(cashInRow?.count ?? 0),
       daily,
       apOutstanding: Number(apRow?.outstanding ?? 0),
     })
@@ -334,7 +333,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
 })
 
 // ── AP AGING ──────────────────────────────────────────────────
-// Buckets unpaid/partial bills by how many days overdue
 router.get('/ap-aging', adminAuth, async (req, res) => {
   try {
     const bills = await db.prepare(`
@@ -353,7 +351,6 @@ router.get('/ap-aging', adminAuth, async (req, res) => {
       ORDER BY days_overdue DESC
     `).all()
 
-    // Bucket into aging periods
     const buckets = { current: [], days1_30: [], days31_60: [], days61_90: [], over90: [] }
     for (const bill of bills) {
       const d = bill.days_overdue
