@@ -7,6 +7,19 @@ const { auditLog } = require('../middleware/auditLog')
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001'
 const COGS_TRIGGER_STATUSES = ['paid', 'shipped']
 
+// ── Helper: ensure status log table ───────────────────────────
+async function ensureStatusLogTable() {
+  await db.exec(`CREATE TABLE IF NOT EXISTS order_status_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    changed_by TEXT,
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`)
+}
+
 // ── Helper: log COGS for an order ─────────────────────────────
 async function logOrderCogs(order) {
   const items    = JSON.parse(order.items_json || '[]')
@@ -91,7 +104,7 @@ async function logOrderCogs(order) {
   })
 
   if (batchStatements.length) {
-    await db.batch(batchStatements, 'write')  // ✅ fixed
+    await db.batch(batchStatements, 'write')
   }
 
   return totalCogs
@@ -114,7 +127,7 @@ async function reverseOrderCogs(order) {
   batchStatements.push({ sql: 'UPDATE orders SET cogs_logged = 0 WHERE id = ?', args: [order.id] })
 
   if (batchStatements.length) {
-    await db.batch(batchStatements, 'write')  // ✅ fixed
+    await db.batch(batchStatements, 'write')
   }
 }
 
@@ -133,10 +146,20 @@ router.get('/', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-// ── GET stats ─────────────────────────────────────────────────
+// ── GET stats (Dashboard 2.0) ─────────────────────────────────
 router.get('/stats', adminAuth, async (req, res) => {
   try {
-    const [total, byStatus, monthly, daily7] = await Promise.all([
+    const today      = new Date().toISOString().split('T')[0]
+    const lastWeekDate = new Date()
+    lastWeekDate.setDate(lastWeekDate.getDate() - 7)
+    const lastWeekDay = lastWeekDate.toISOString().split('T')[0]
+
+    const [
+      total, byStatus, monthly, daily7,
+      todayRow, lastWeekDayRow, daily30,
+      pendingRow, overdueAP, lowStockMat,
+      topProductToday
+    ] = await Promise.all([
       db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as revenue FROM orders WHERE status IN ('paid','shipped')`).get(),
       db.prepare('SELECT status, COUNT(*) as count FROM orders GROUP BY status').all(),
       db.prepare(`
@@ -149,8 +172,48 @@ router.get('/stats', adminAuth, async (req, res) => {
         FROM orders WHERE status IN ('paid','shipped') AND created_at >= date('now', '-7 days')
         GROUP BY day ORDER BY day ASC
       `).all(),
+      db.prepare(`SELECT COALESCE(SUM(total),0) as revenue, COUNT(*) as count FROM orders WHERE status IN ('paid','shipped') AND date(created_at) = ?`).get(today),
+      db.prepare(`SELECT COALESCE(SUM(total),0) as revenue FROM orders WHERE status IN ('paid','shipped') AND date(created_at) = ?`).get(lastWeekDay),
+      db.prepare(`
+        SELECT date(created_at) as day, COALESCE(SUM(total),0) as revenue
+        FROM orders WHERE status IN ('paid','shipped') AND created_at >= date('now', '-30 days')
+        GROUP BY day ORDER BY day ASC
+      `).all(),
+      db.prepare(`SELECT COUNT(*) as count FROM orders WHERE status = 'pending'`).get(),
+      db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(total),0) as amount FROM purchase_bills WHERE status = 'unpaid' AND due_date IS NOT NULL AND due_date < date('now')`).get(),
+      db.prepare(`SELECT COUNT(*) as count FROM materials WHERE reorder_level > 0 AND qty_in_stock <= reorder_level`).get(),
+      db.prepare(`
+        SELECT oc.product_name, COALESCE(SUM(oc.qty_sold),0) as qty
+        FROM order_cogs oc
+        JOIN orders o ON oc.order_id = o.id
+        WHERE o.status IN ('paid','shipped') AND date(o.created_at) = ?
+        GROUP BY oc.product_name ORDER BY qty DESC LIMIT 1
+      `).get(today),
     ])
-    res.json({ total, byStatus, monthly, daily7 })
+
+    res.json({
+      total, byStatus, monthly, daily7, daily30,
+      today: {
+        revenue:     Number(todayRow?.revenue || 0),
+        count:       Number(todayRow?.count   || 0),
+        lastWeekRev: Number(lastWeekDayRow?.revenue || 0),
+      },
+      pending:    Number(pendingRow?.count || 0),
+      overdueAP:  { count: Number(overdueAP?.count || 0), amount: Number(overdueAP?.amount || 0) },
+      lowStock:   Number(lowStockMat?.count || 0),
+      topProduct: topProductToday || null,
+    })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ── GET order timeline ─────────────────────────────────────────
+router.get('/:id/timeline', adminAuth, async (req, res) => {
+  try {
+    await ensureStatusLogTable()
+    const log = await db.prepare(
+      'SELECT * FROM order_status_log WHERE order_id = ? ORDER BY created_at ASC'
+    ).all(req.params.id)
+    res.json(log)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -177,7 +240,13 @@ router.patch('/:id/status', adminAuth, async (req, res) => {
       cogsAction = 'reversed'
     }
 
-    await db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, req.params.id)
+    const adminEmail = req.admin?.email || 'system'
+    await ensureStatusLogTable()
+
+    await db.batch([
+      { sql: 'UPDATE orders SET status = ? WHERE id = ?', args: [status, req.params.id] },
+      { sql: 'INSERT INTO order_status_log (order_id, from_status, to_status, changed_by) VALUES (?,?,?,?)', args: [req.params.id, order.status, status, adminEmail] },
+    ], 'write')
 
     await auditLog({
       req, action: 'UPDATE', entity: 'order', entityId: req.params.id,
@@ -188,6 +257,42 @@ router.patch('/:id/status', adminAuth, async (req, res) => {
     res.json({ success: true, cogsAction, totalCogs: totalCogs.toFixed(2) })
   } catch (e) {
     console.error('Status update error:', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ── POST bulk status update ────────────────────────────────────
+router.post('/bulk-status', adminAuth, async (req, res) => {
+  try {
+    const { ids, status } = req.body
+    const valid = ['pending', 'paid', 'shipped', 'refunded', 'cancelled']
+    if (!valid.includes(status) || !Array.isArray(ids) || !ids.length)
+      return res.status(400).json({ error: 'Invalid payload' })
+
+    await ensureStatusLogTable()
+    const adminEmail = req.admin?.email || 'system'
+    let updatedCount = 0
+
+    for (const id of ids) {
+      const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id)
+      if (!order || order.status === status) continue
+
+      const wasTriggered = COGS_TRIGGER_STATUSES.includes(order.status)
+      const willTrigger  = COGS_TRIGGER_STATUSES.includes(status)
+      if (willTrigger && !order.cogs_logged) await logOrderCogs(order)
+      if (!willTrigger && wasTriggered && order.cogs_logged) await reverseOrderCogs(order)
+
+      await db.batch([
+        { sql: 'UPDATE orders SET status = ? WHERE id = ?', args: [status, id] },
+        { sql: 'INSERT INTO order_status_log (order_id, from_status, to_status, changed_by) VALUES (?,?,?,?)', args: [id, order.status, status, adminEmail] },
+      ], 'write')
+
+      updatedCount++
+    }
+
+    res.json({ success: true, updated: updatedCount })
+  } catch (e) {
+    console.error('Bulk status error:', e)
     res.status(500).json({ error: e.message })
   }
 })

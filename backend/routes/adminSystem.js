@@ -137,3 +137,47 @@ router.get('/archives/:table', adminAuth, async (req, res) => {
 })
 
 module.exports = router
+// ── GLOBAL SEARCH ─────────────────────────────────────────────
+
+router.get('/search', adminAuth, async (req, res) => {
+  try {
+    const { q } = req.query
+    if (!q || q.trim().length < 2) return res.json({ orders: [], products: [], bills: [], customers: [] })
+
+    const term = `%${q.trim()}%`
+
+    const [orders, products, bills, customers] = await Promise.all([
+      db.prepare(`
+        SELECT id, reference, full_name, phone1, total, status, created_at
+        FROM orders
+        WHERE reference LIKE ? OR full_name LIKE ? OR phone1 LIKE ?
+        ORDER BY created_at DESC LIMIT 8
+      `).all(term, term, term),
+
+      db.prepare(`
+        SELECT id, name, price, stock, category
+        FROM products
+        WHERE name LIKE ? OR category LIKE ?
+        ORDER BY name ASC LIMIT 8
+      `).all(term, term),
+
+      db.prepare(`
+        SELECT pb.id, pb.bill_number, pb.total, pb.status, pb.bill_date, s.name as supplier_name
+        FROM purchase_bills pb
+        LEFT JOIN suppliers s ON pb.supplier_id = s.id
+        WHERE pb.bill_number LIKE ? OR s.name LIKE ?
+        ORDER BY pb.bill_date DESC LIMIT 8
+      `).all(term, term),
+
+      db.prepare(`
+        SELECT full_name, nic, phone1, city, COUNT(*) as order_count, SUM(total) as total_spent
+        FROM orders
+        WHERE full_name LIKE ? OR nic LIKE ? OR phone1 LIKE ?
+        GROUP BY nic
+        ORDER BY total_spent DESC LIMIT 8
+      `).all(term, term, term),
+    ])
+
+    res.json({ orders, products, bills, customers })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})

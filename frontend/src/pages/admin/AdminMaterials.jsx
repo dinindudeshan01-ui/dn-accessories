@@ -1,4 +1,7 @@
+// src/pages/admin/AdminMaterials.jsx — v2: reorder alerts + auto-draft bill
+
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import adminApi from '../../lib/adminApi'
 import {
   PageHeader, PageContent, KpiGrid, KpiCard,
@@ -8,6 +11,7 @@ import {
 } from '../../components/admin/AdminUI'
 
 export default function AdminMaterials() {
+  const navigate = useNavigate()
   const [materials, setMaterials] = useState([])
   const [units,     setUnits]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -59,8 +63,20 @@ export default function AdminMaterials() {
     catch (e) { alert(e.response?.data?.error || 'Cannot delete this material') }
   }
 
+  // Auto-draft bill: navigate to Bills with prefilled query params
+  function autoDraftBill(m) {
+    // Encode material info as URL state
+    navigate('/admin/bills', {
+      state: {
+        autoDraft: true,
+        material: { id: m.id, name: m.name, unit: m.unit, avg_cost: m.avg_cost }
+      }
+    })
+  }
+
   const totalValue = materials.reduce((s, m) => s + (m.qty_in_stock * m.avg_cost), 0)
-  const lowStock   = materials.filter(m => m.qty_in_stock > 0 && m.reorder_level > 0 && m.qty_in_stock <= m.reorder_level).length
+  const belowReorder = materials.filter(m => m.reorder_level > 0 && m.qty_in_stock <= m.reorder_level)
+  const lowStock   = belowReorder.length
   const outOfStock = materials.filter(m => m.qty_in_stock === 0).length
 
   const stockStatus = m => {
@@ -84,21 +100,58 @@ export default function AdminMaterials() {
       />
       <PageContent>
 
+        {/* Reorder alert banner */}
         {(lowStock > 0 || outOfStock > 0) && (
           <AlertBanner
             type={outOfStock > 0 ? 'danger' : 'warning'}
             title={outOfStock > 0
               ? `${outOfStock} material${outOfStock > 1 ? 's' : ''} out of stock`
               : `${lowStock} material${lowStock > 1 ? 's' : ''} below reorder level`}
-            body="Check the list below and place purchase orders with your suppliers."
+            body="Check the list below and use Auto-Draft Bill to quickly create a purchase order."
           />
+        )}
+
+        {/* Per-material reorder chips */}
+        {belowReorder.length > 0 && (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:20 }}>
+            {belowReorder.map(m => (
+              <div key={m.id} style={{
+                display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                background: m.qty_in_stock === 0 ? 'rgba(255,45,120,0.08)' : 'rgba(255,197,61,0.08)',
+                border: `1px solid ${m.qty_in_stock === 0 ? 'rgba(255,45,120,0.25)' : 'rgba(255,197,61,0.25)'}`,
+                borderRadius: 10,
+              }}>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color: m.qty_in_stock === 0 ? T.pink : T.gold }}>
+                    {m.qty_in_stock === 0 ? '⚠ OUT' : '⚡ LOW'} — {m.name}
+                  </div>
+                  <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>
+                    {m.qty_in_stock} {m.unit} in stock · reorder at {m.reorder_level}
+                  </div>
+                </div>
+                <button
+                  onClick={() => autoDraftBill(m)}
+                  style={{
+                    padding:'6px 12px', borderRadius:8, border:`1px solid ${T.border}`,
+                    background: T.card, color: T.cyan, fontSize:11, fontWeight:700,
+                    cursor:'pointer', whiteSpace:'nowrap',
+                    transition:'all 0.15s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = T.cyan}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = T.border}
+                >
+                  Auto-Draft Bill →
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         <KpiGrid>
           <KpiCard label="Total Materials"  value={materials.length} />
           <KpiCard label="Inventory Value"  value={`Rs ${Math.round(totalValue).toLocaleString()}`} accent />
-          <KpiCard label="Low Stock"        value={lowStock}  change={lowStock  > 0 ? 'Needs reorder' : 'All good'} changeUp={lowStock  === 0} />
-          <KpiCard label="Out of Stock"     value={outOfStock} change={outOfStock > 0 ? 'Urgent'       : 'All good'} changeUp={outOfStock === 0} />
+          <KpiCard label="Low Stock"        value={lowStock}   change={lowStock   > 0 ? 'Needs reorder' : 'All good'} changeUp={lowStock   === 0} />
+          <KpiCard label="Out of Stock"     value={outOfStock} change={outOfStock > 0 ? 'Urgent'        : 'All good'} changeUp={outOfStock === 0} />
         </KpiGrid>
 
         <Card>
@@ -111,7 +164,7 @@ export default function AdminMaterials() {
                 const st  = stockStatus(m)
                 const cfg = statusCfg[st]
                 return (
-                  <Tr key={m.id}>
+                  <Tr key={m.id} style={{ background: st !== 'ok' ? `${cfg.bg.replace('0.12','0.03')}` : undefined }}>
                     <Td>
                       <div style={{ fontWeight:600, color:T.text }}>{m.name}</div>
                       {m.notes && <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{m.notes.slice(0,40)}{m.notes.length>40?'…':''}</div>}
@@ -131,7 +184,13 @@ export default function AdminMaterials() {
                       </span>
                     </Td>
                     <Td>
-                      <div style={{ display:'flex', gap:6 }}>
+                      <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                        {st !== 'ok' && (
+                          <Btn size="sm" variant="ghost" onClick={() => autoDraftBill(m)}
+                            style={{ color: T.cyan, borderColor: 'rgba(0,229,255,0.3)' }}>
+                            📋 Draft Bill
+                          </Btn>
+                        )}
                         <Btn size="sm" variant="ghost" onClick={() => setHistModal(m)}>History</Btn>
                         <Btn size="sm" variant="ghost" onClick={() => openEdit(m)}>Edit</Btn>
                         <Btn size="sm" variant="danger" onClick={() => deleteMaterial(m.id)}>Del</Btn>
@@ -156,7 +215,7 @@ export default function AdminMaterials() {
             {modal === 'add' && (
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                 <Input label="Opening Stock (qty)"       type="number"             value={form.opening_stock} onChange={e => setForm(f=>({...f,opening_stock:e.target.value}))} placeholder="0" />
-                <Input label="Opening Cost (Rs per unit)" type="number" step="0.01" value={form.opening_cost} onChange={e => setForm(f=>({...f,opening_cost:e.target.value}))}  placeholder="0.00" />
+                <Input label="Opening Cost (Rs per unit)" type="number" step="0.01" value={form.opening_cost} onChange={e => setForm(f=>({...f,opening_cost:e.target.value}))} placeholder="0.00" />
               </div>
             )}
             <Input label="Reorder Level" type="number" value={form.reorder_level} onChange={e => setForm(f=>({...f,reorder_level:e.target.value}))} placeholder="Alert when stock falls below this" />
@@ -207,9 +266,7 @@ function HistoryModal({ material, onClose }) {
               </div>
             ))}
           </div>
-
           <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:'0.12em', textTransform:'uppercase' }}>Purchase History</div>
-
           {!data.history?.length ? (
             <div style={{ color:T.muted, fontSize:13, padding:'20px 0', textAlign:'center' }}>No history yet</div>
           ) : (
@@ -230,7 +287,6 @@ function HistoryModal({ material, onClose }) {
               ))}
             </div>
           )}
-
           <div style={{ display:'flex', justifyContent:'flex-end' }}>
             <Btn variant="ghost" onClick={onClose}>Close</Btn>
           </div>

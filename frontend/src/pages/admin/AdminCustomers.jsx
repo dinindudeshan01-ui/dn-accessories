@@ -1,3 +1,5 @@
+// src/pages/admin/AdminCustomers.jsx — v2: LTV + VIP
+
 import { useState, useEffect } from 'react'
 import adminApi from '../../lib/adminApi'
 import {
@@ -34,6 +36,7 @@ export default function AdminCustomers() {
   const [loading,   setLoading]   = useState(true)
   const [search,    setSearch]    = useState('')
   const [expanded,  setExpanded]  = useState(null)
+  const [sortBy,    setSortBy]    = useState('ltv') // ltv | orders | avg | recent
 
   useEffect(() => { load() }, [])
 
@@ -49,52 +52,72 @@ export default function AdminCustomers() {
     } finally { setLoading(false) }
   }
 
-  const filtered = customers.filter(c =>
-    c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.nic?.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone1?.includes(search) ||
-    c.city?.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = customers
+    .filter(c =>
+      c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      c.nic?.toLowerCase().includes(search.toLowerCase()) ||
+      c.phone1?.includes(search) ||
+      c.city?.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (sortBy === 'ltv')    return b.total_spent - a.total_spent
+      if (sortBy === 'orders') return b.order_count - a.order_count
+      if (sortBy === 'avg')    return (b.avg_order_value || 0) - (a.avg_order_value || 0)
+      if (sortBy === 'recent') return new Date(b.last_order) - new Date(a.last_order)
+      return 0
+    })
 
   return (
     <>
-      <PageHeader title="Customers" subtitle="Auto-built from order history" />
+      <PageHeader title="Customers" subtitle="Lifetime value & order history" />
       <PageContent>
 
-        {/* KPIs */}
         <KpiGrid>
-          <KpiCard label="Total Customers" value={stats?.total ?? '—'} color={T.pink} />
-          <KpiCard label="Repeat Customers" value={stats?.repeat ?? '—'} color={T.cyan} />
+          <KpiCard label="Total Customers"  value={stats?.total   ?? '—'} color={T.pink} />
+          <KpiCard label="Repeat Customers" value={stats?.repeat  ?? '—'} color={T.cyan} />
+          <KpiCard label="VIP Customers"    value={stats?.vipCount ?? '—'} color={T.gold} />
           <KpiCard
             label="Top Spender"
             value={stats?.topSpend ? `Rs ${Number(stats.topSpend.spent).toLocaleString()}` : '—'}
-            sub={stats?.topSpend?.full_name}
-            color={T.gold}
+            change={stats?.topSpend?.full_name}
+            changeUp
           />
         </KpiGrid>
 
-        {/* Search */}
-        <div style={{ marginBottom: 20 }}>
+        {/* Search + sort */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
           <input
             className="dn-input"
-            placeholder="Search by name, NIC, phone or city..."
+            placeholder="Search by name, NIC, phone or city…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{
-              width: '100%', maxWidth: 400,
+              flex: 1, minWidth: 220, maxWidth: 380,
               background: T.card, border: `1px solid ${T.border}`,
               borderRadius: 10, padding: '10px 16px',
               color: T.text, fontSize: 13
             }}
           />
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[
+              { v: 'ltv',    l: 'Sort: LTV' },
+              { v: 'orders', l: 'Sort: Orders' },
+              { v: 'avg',    l: 'Sort: Avg Order' },
+              { v: 'recent', l: 'Sort: Recent' },
+            ].map(({ v, l }) => (
+              <button key={v} onClick={() => setSortBy(v)} style={{
+                padding: '8px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                background: sortBy === v ? T.pink : T.card,
+                color:      sortBy === v ? '#fff'  : T.muted,
+                transition: 'all 0.15s',
+              }}>{l}</button>
+            ))}
+          </div>
         </div>
 
-        {/* Table */}
         <Card>
-          <CardHeader
-            title={`${filtered.length} Customer${filtered.length !== 1 ? 's' : ''}`}
-            sub="Grouped by NIC"
-          />
+          <CardHeader title={`${filtered.length} Customer${filtered.length !== 1 ? 's' : ''}`} sub="Grouped by NIC" />
+
           {loading ? (
             <div style={{ padding: 60, textAlign: 'center' }}><Spinner /></div>
           ) : filtered.length === 0 ? (
@@ -102,39 +125,60 @@ export default function AdminCustomers() {
               {search ? 'No customers match your search.' : 'No orders yet — customers appear here automatically.'}
             </div>
           ) : (
-            <Table headers={['Customer', 'NIC', 'Contact', 'City', 'Orders', 'Total Spent', '']}>
+            <Table headers={['Customer', 'NIC', 'Contact', 'City', 'Orders', 'Avg Order', 'Total LTV', 'First → Last', '']}>
               {filtered.map((c, i) => (
                 <>
                   <Tr key={c.nic + i}>
                     <Td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {/* Avatar */}
                         <div style={{
                           width: 34, height: 34, borderRadius: 10,
-                          background: `rgba(255,45,120,0.12)`,
-                          border: `1px solid rgba(255,45,120,0.2)`,
+                          background: c.is_vip ? 'rgba(255,197,61,0.15)' : 'rgba(255,45,120,0.12)',
+                          border: `1px solid ${c.is_vip ? 'rgba(255,197,61,0.3)' : 'rgba(255,45,120,0.2)'}`,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 14, fontWeight: 900, color: T.pink, flexShrink: 0
+                          fontSize: 14, fontWeight: 900,
+                          color: c.is_vip ? T.gold : T.pink, flexShrink: 0,
+                          position: 'relative',
                         }}>
                           {c.full_name?.[0]?.toUpperCase() || '?'}
                         </div>
+
                         <div>
                           <div style={{ fontWeight: 700, color: T.text, fontSize: 13 }}>{c.full_name}</div>
-                          {c.order_count > 1 && (
-                            <span style={{
-                              fontSize: 10, fontWeight: 700, color: T.lime,
-                              background: 'rgba(184,255,60,0.1)', padding: '1px 7px',
-                              borderRadius: 999, letterSpacing: '0.06em'
-                            }}>REPEAT</span>
-                          )}
+                          <div style={{ display: 'flex', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
+                            {c.is_vip && (
+                              <span style={{
+                                fontSize: 9, fontWeight: 800, color: T.gold,
+                                background: 'rgba(255,197,61,0.12)', padding: '1px 6px',
+                                borderRadius: 999, letterSpacing: '0.06em'
+                              }}>⭐ VIP</span>
+                            )}
+                            {c.order_count > 1 && (
+                              <span style={{
+                                fontSize: 9, fontWeight: 700, color: T.lime,
+                                background: 'rgba(184,255,60,0.1)', padding: '1px 6px',
+                                borderRadius: 999, letterSpacing: '0.06em'
+                              }}>REPEAT</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </Td>
-                    <Td><span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{c.nic || '—'}</span></Td>
+
+                    <Td>
+                      <span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{c.nic || '—'}</span>
+                    </Td>
+
                     <Td>
                       <div style={{ fontSize: 12, color: T.text }}>{c.phone1}</div>
                       {c.phone2 && <div style={{ fontSize: 11, color: T.muted }}>{c.phone2}</div>}
                     </Td>
-                    <Td><span style={{ fontSize: 12, color: T.muted }}>{c.city || '—'}</span></Td>
+
+                    <Td>
+                      <span style={{ fontSize: 12, color: T.muted }}>{c.city || '—'}</span>
+                    </Td>
+
                     <Td>
                       <span style={{
                         fontWeight: 800, color: T.cyan,
@@ -142,45 +186,57 @@ export default function AdminCustomers() {
                         padding: '3px 10px', borderRadius: 999, fontSize: 12
                       }}>{c.order_count}</span>
                     </Td>
+
+                    <Td>
+                      <span style={{ fontSize: 12, color: T.text }}>
+                        Rs {Math.round(c.avg_order_value || 0).toLocaleString()}
+                      </span>
+                    </Td>
+
                     <Td>
                       <span style={{ fontWeight: 800, color: T.gold, fontSize: 13 }}>
                         Rs {Number(c.total_spent).toLocaleString()}
                       </span>
                     </Td>
+
                     <Td>
-                      <Btn
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setExpanded(expanded === c.nic ? null : c.nic)}
-                      >
+                      <div style={{ fontSize: 10, color: T.muted }}>
+                        <div>{c.first_order ? new Date(c.first_order).toLocaleDateString() : '—'}</div>
+                        <div style={{ color: T.text, fontSize: 11, marginTop: 2 }}>
+                          → {c.last_order ? new Date(c.last_order).toLocaleDateString() : '—'}
+                        </div>
+                      </div>
+                    </Td>
+
+                    <Td>
+                      <Btn size="sm" variant="ghost" onClick={() => setExpanded(expanded === c.nic ? null : c.nic)}>
                         {expanded === c.nic ? '▲ Hide' : '▼ Orders'}
                       </Btn>
                     </Td>
                   </Tr>
 
-                  {/* Expanded order history */}
                   {expanded === c.nic && (
-                    <tr key={c.nic + '-expanded'}>
-                      <td colSpan={7} style={{ padding: '0 0 12px 0', background: 'transparent' }}>
+                    <tr key={c.nic + '-exp'}>
+                      <td colSpan={9} style={{ padding: '0 0 12px 0', background: 'transparent' }}>
                         <div style={{
                           margin: '0 8px', borderRadius: 12,
-                          background: 'rgba(255,45,120,0.04)',
-                          border: `1px solid rgba(255,45,120,0.12)`,
+                          background: c.is_vip ? 'rgba(255,197,61,0.04)' : 'rgba(255,45,120,0.04)',
+                          border: `1px solid ${c.is_vip ? 'rgba(255,197,61,0.12)' : 'rgba(255,45,120,0.12)'}`,
                           overflow: 'hidden'
                         }}>
-                          {/* Address bar */}
                           <div style={{
                             padding: '10px 16px', borderBottom: `1px solid ${T.border}`,
-                            fontSize: 12, color: T.muted, display: 'flex', gap: 16
+                            fontSize: 12, color: T.muted, display: 'flex', gap: 24, flexWrap: 'wrap',
                           }}>
                             <span>📍 {[c.address, c.city].filter(Boolean).join(', ') || 'No address'}</span>
+                            <span>📦 {c.order_count} orders  ·  Rs {Number(c.total_spent).toLocaleString()} lifetime</span>
+                            <span>📅 First: {c.first_order ? new Date(c.first_order).toLocaleDateString() : '—'}</span>
                           </div>
 
-                          {/* Orders */}
                           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                               <tr>
-                                {['Reference', 'Date', 'Items', 'Total', 'Status'].map(h => (
+                                {['Reference','Date','Items','Total','Status'].map(h => (
                                   <th key={h} style={{
                                     padding: '8px 14px', textAlign: 'left',
                                     fontSize: 10, fontWeight: 800, color: T.muted,

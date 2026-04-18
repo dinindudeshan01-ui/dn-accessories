@@ -1,9 +1,10 @@
 // src/components/admin/AdminLayout.jsx
-// V12 — QB-style grouped navigation
+// V13 — QB-style grouped navigation + GlobalSearch (Cmd+K)
 
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAdmin } from '../../context/AdminContext'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import GlobalSearch from './GlobalSearch'
 
 const T = {
   bg:      '#080810',
@@ -130,8 +131,15 @@ export default function AdminLayout() {
     navigate('/admin/login')
   }
 
+  function openSearch() {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: T.bg, fontFamily: T.font }}>
+
+      {/* ── Global Search overlay (Cmd+K) ── */}
+      <GlobalSearch />
 
       {/* ── Sidebar ── */}
       <aside style={{
@@ -181,6 +189,28 @@ export default function AdminLayout() {
             }} />
             <span style={{ fontSize: 9, fontWeight: 700, color: T.lime, letterSpacing: '0.08em' }}>LIVE</span>
           </div>
+
+          {/* Search button (Cmd+K) */}
+          <button
+            onClick={openSearch}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              marginTop: 10, padding: '8px 10px', borderRadius: 8,
+              background: 'rgba(255,255,255,0.03)', border: `1px solid ${T.border}`,
+              cursor: 'pointer', color: T.muted, fontFamily: T.font, fontSize: 12,
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,45,120,0.3)'; e.currentTarget.style.color = T.text }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.muted }}
+          >
+            <span style={{ fontSize: 13 }}>⌕</span>
+            <span style={{ flex: 1, textAlign: 'left' }}>Search…</span>
+            <kbd style={{
+              padding: '1px 5px', borderRadius: 4, fontSize: 9, fontWeight: 800,
+              background: T.faint, border: `1px solid ${T.border}`,
+              color: T.muted, letterSpacing: '0.05em',
+            }}>⌘K</kbd>
+          </button>
         </div>
 
         <div style={{ height: 1, background: T.border, margin: '0 14px 8px' }} />
