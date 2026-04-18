@@ -24,18 +24,14 @@ const upload = multer({
 })
 
 // ── Helper: upload buffer to Cloudinary ──────────────────────
-function uploadToCloudinary(buffer, mimetype) {
+function uploadToCloudinary(buffer) {
   return new Promise((resolve, reject) => {
-    const isPdf        = mimetype === 'application/pdf'
-    const resourceType = isPdf ? 'raw' : 'image'
-    const ext          = isPdf ? '.pdf' : ''
-    const uniqueName   = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${ext}`
-
+    const uniqueName = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     const stream = cloudinary.uploader.upload_stream(
       {
         folder:        'dn-accessories/slips',
         public_id:     uniqueName,
-        resource_type: resourceType,
+        resource_type: 'image', // handles both images and PDFs (converts PDF page 1 to image)
       },
       (error, result) => {
         if (error) return reject(error)
@@ -64,7 +60,7 @@ router.post('/', upload.single('slip'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Payment slip is required' })
 
-    const slipUrl = await uploadToCloudinary(req.file.buffer, req.file.mimetype)
+    const slipUrl = await uploadToCloudinary(req.file.buffer)
 
     const result = await db.prepare(`
       INSERT INTO orders (full_name, nic, phone1, phone2, address, city, total, items_json, slip_path, bank_used, status)

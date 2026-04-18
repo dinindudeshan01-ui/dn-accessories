@@ -74,7 +74,6 @@ export default function AdminOrders() {
     if (next && !timelines[next]) loadTimeline(next)
   }
 
-  // ── Selection ──
   function toggleSelect(id) {
     setSelected(prev => {
       const n = new Set(prev)
@@ -87,7 +86,6 @@ export default function AdminOrders() {
     else setSelected(new Set(orders.map(o => o.id)))
   }
 
-  // ── Bulk status ──
   async function doBulkStatus() {
     if (!selected.size) return
     setBulking(true)
@@ -98,7 +96,6 @@ export default function AdminOrders() {
     } finally { setBulking(false) }
   }
 
-  // ── Bulk CSV export ──
   function exportCsv() {
     const toExport = orders.filter(o => selected.size ? selected.has(o.id) : true)
     const rows = [
@@ -125,7 +122,6 @@ export default function AdminOrders() {
     URL.revokeObjectURL(url)
   }
 
-  // ── Bulk print slips ──
   function printSlips() {
     const toprint = orders.filter(o => selected.has(o.id) && o.slip_url)
     if (!toprint.length) return alert('No slip-uploaded orders selected')
@@ -139,7 +135,7 @@ export default function AdminOrders() {
     toprint.forEach(o => {
       win.document.write(`<div class="slip">
         <div class="info"><strong>${formatRef(o)}</strong> — ${o.full_name} — Rs ${Number(o.total).toLocaleString()}</div>
-        ${o.slip_url.match(/\.pdf$/i) ? `<iframe src="${o.slip_url}" width="100%" height="600"></iframe>` : `<img src="${o.slip_url}" />`}
+        <img src="${o.slip_url}" />
       </div>`)
     })
     win.document.write('</body></html>')
@@ -182,7 +178,6 @@ export default function AdminOrders() {
         </KpiGrid>
 
         <Card>
-          {/* Bulk action bar */}
           {someSelected && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
@@ -192,11 +187,8 @@ export default function AdminOrders() {
               <span style={{ fontSize: 13, fontWeight: 700, color: T.pink }}>
                 {selected.size} selected
               </span>
-              <Select
-                value={bulkStatus}
-                onChange={e => setBulkStatus(e.target.value)}
-                style={{ padding: '5px 10px', fontSize: 12, width: 'auto' }}
-              >
+              <Select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+                style={{ padding: '5px 10px', fontSize: 12, width: 'auto' }}>
                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </Select>
               <Btn size="sm" onClick={doBulkStatus} disabled={bulking}>
@@ -204,18 +196,14 @@ export default function AdminOrders() {
               </Btn>
               <Btn size="sm" variant="ghost" onClick={exportCsv}>⬇ CSV</Btn>
               <Btn size="sm" variant="ghost" onClick={printSlips}>🖨 Print Slips</Btn>
-              <button
-                onClick={() => setSelected(new Set())}
-                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 18 }}
-              >×</button>
+              <button onClick={() => setSelected(new Set())}
+                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 18 }}>×</button>
             </div>
           )}
 
           <CardHeader
             title={`${orders.length} orders`}
-            action={
-              <Btn size="sm" variant="ghost" onClick={exportCsv} title="Export all to CSV">⬇ Export CSV</Btn>
-            }
+            action={<Btn size="sm" variant="ghost" onClick={exportCsv}>⬇ Export CSV</Btn>}
           />
 
           {loading ? <Spinner /> : (
@@ -231,12 +219,9 @@ export default function AdminOrders() {
                     style={{ background: expanded === o.id ? 'rgba(255,45,120,0.04)' : selected.has(o.id) ? 'rgba(255,45,120,0.06)' : undefined }}
                   >
                     <Td onClick={e => e.stopPropagation()} style={{ width: 36 }}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(o.id)}
+                      <input type="checkbox" checked={selected.has(o.id)}
                         onChange={() => toggleSelect(o.id)}
-                        style={{ cursor:'pointer', accentColor: T.pink }}
-                      />
+                        style={{ cursor:'pointer', accentColor: T.pink }} />
                     </Td>
                     <Td pink style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatRef(o)}</Td>
                     <Td>
@@ -249,11 +234,8 @@ export default function AdminOrders() {
                     <Td><StatusPill status={o.status} /></Td>
                     <Td muted style={{ fontSize: 11 }}>{new Date(o.created_at).toLocaleDateString()}</Td>
                     <Td onClick={e => e.stopPropagation()}>
-                      <Select
-                        value={o.status}
-                        onChange={e => updateStatus(o.id, e.target.value)}
-                        style={{ padding: '4px 8px', fontSize: 11, width: 'auto' }}
-                      >
+                      <Select value={o.status} onChange={e => updateStatus(o.id, e.target.value)}
+                        style={{ padding: '4px 8px', fontSize: 11, width: 'auto' }}>
                         {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </Select>
                     </Td>
@@ -298,29 +280,20 @@ export default function AdminOrders() {
                           </div>
                         </div>
 
-                        {/* Payment Slip + Quick Actions */}
+                        {/* Payment Slip */}
                         <div>
                           <SectionLabel>Payment Slip</SectionLabel>
                           {o.slip_url ? (
-                            o.slip_url.match(/\.(jpg|jpeg|png|webp)$/i) ? (
-                              <img
-                                src={o.slip_url}
-                                alt="Payment slip"
-                                onClick={() => setSlipModal(o.slip_url)}
-                                style={{
-                                  width: '100%', maxHeight: 160, objectFit: 'cover',
-                                  borderRadius: 10, border: `1px solid ${T.border}`,
-                                  cursor: 'pointer', marginBottom: 10,
-                                }}
-                              />
-                            ) : (
-                              <a href={o.slip_url} target="_blank" rel="noreferrer" style={{
-                                display: 'block', padding: '12px 16px',
-                                background: 'rgba(255,45,120,0.08)', border: `1px solid rgba(255,45,120,0.2)`,
-                                borderRadius: 10, color: T.pink, fontSize: 12, fontWeight: 700,
-                                textDecoration: 'none', marginBottom: 10, textAlign: 'center',
-                              }}>📄 View PDF Slip →</a>
-                            )
+                            <img
+                              src={o.slip_url}
+                              alt="Payment slip"
+                              onClick={() => setSlipModal(o.slip_url)}
+                              style={{
+                                width: '100%', maxHeight: 200, objectFit: 'cover',
+                                borderRadius: 10, border: `1px solid ${T.border}`,
+                                cursor: 'pointer', marginBottom: 10,
+                              }}
+                            />
                           ) : (
                             <div style={{ padding: '16px 0', color: T.muted, fontSize: 12 }}>No slip uploaded</div>
                           )}
@@ -357,14 +330,11 @@ export default function AdminOrders() {
       </PageContent>
 
       {slipModal && (
-        <div
-          onClick={() => setSlipModal(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 9999,
-            background: 'rgba(0,0,0,0.85)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-          }}
-        >
+        <div onClick={() => setSlipModal(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }}>
           <img src={slipModal} alt="Payment slip"
             style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 12, objectFit: 'contain' }}
             onClick={e => e.stopPropagation()} />
@@ -380,36 +350,29 @@ export default function AdminOrders() {
   )
 }
 
-// ── Order Timeline component ──────────────────────────────────
 function OrderTimeline({ events, createdAt }) {
   if (!events) return <div style={{ color: T.muted, fontSize: 12, paddingTop: 8 }}>Loading…</div>
-
   const allEvents = [
     { to_status: 'pending', created_at: createdAt, changed_by: 'customer', isCreated: true },
     ...(events || []),
   ]
-
   return (
     <div style={{ position: 'relative', paddingLeft: 20 }}>
-      {/* Vertical line */}
       <div style={{
         position: 'absolute', left: 7, top: 8, bottom: 8,
         width: 2, background: `linear-gradient(to bottom, ${T.pink}, ${T.faint})`,
         borderRadius: 2,
       }} />
-
       {allEvents.map((ev, i) => {
         const color = STATUS_COLORS[ev.to_status] || T.muted
         return (
           <div key={i} style={{ display: 'flex', gap: 12, marginBottom: 16, position: 'relative' }}>
-            {/* Dot */}
             <div style={{
               position: 'absolute', left: -13, top: 3,
               width: 10, height: 10, borderRadius: '50%',
               background: color, boxShadow: `0 0 6px ${color}88`,
               border: `2px solid ${T.card}`, flexShrink: 0,
             }} />
-
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                 <span style={{
@@ -426,7 +389,7 @@ function OrderTimeline({ events, createdAt }) {
                 })}
               </div>
               {ev.changed_by && (
-                <div style={{ fontSize: 10, color: T.faint === ev.changed_by ? T.muted : T.muted, marginTop: 1 }}>
+                <div style={{ fontSize: 10, color: T.muted, marginTop: 1 }}>
                   {ev.isCreated ? 'by customer' : `by ${ev.changed_by}`}
                 </div>
               )}
@@ -438,7 +401,6 @@ function OrderTimeline({ events, createdAt }) {
   )
 }
 
-// ── Helpers ───────────────────────────────────────────────────
 function SectionLabel({ children, style }) {
   return (
     <div style={{
