@@ -42,6 +42,37 @@ function uploadToCloudinary(buffer, mimetype) {
   })
 }
 
+// ── WhatsApp notification (fire and forget — never blocks order) ──
+async function notifyWhatsApp(reference, full_name, total, bank_used) {
+  try {
+    const phoneId = process.env.WHATSAPP_PHONE_ID
+    const to      = process.env.WHATSAPP_NOTIFY_TO
+    const token   = process.env.WHATSAPP_TOKEN
+    if (!phoneId || !to || !token) return
+
+    await fetch(`https://graph.facebook.com/v25.0/${phoneId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name:     'hello_world',
+          language: { code: 'en_US' },
+        },
+      }),
+    })
+
+    console.log(`WhatsApp notification sent for ${reference}`)
+  } catch (err) {
+    console.error('WhatsApp notify failed (non-critical):', err.message)
+  }
+}
+
 router.get('/', async (req, res) => {
   try {
     const orders = await db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all()
@@ -68,6 +99,9 @@ router.post('/', upload.single('slip'), async (req, res) => {
     const year      = new Date().getFullYear()
     const reference = `DN-${year}-${String(result.lastInsertRowid).padStart(5, '0')}`
     await db.prepare('UPDATE orders SET reference = ? WHERE id = ?').run(reference, result.lastInsertRowid)
+
+    // Fire WhatsApp notification — non-blocking, won't affect order response
+    notifyWhatsApp(reference, full_name, parseFloat(total), bank_used)
 
     res.json({ id: result.lastInsertRowid, reference, message: 'Order submitted successfully' })
   } catch (err) {
