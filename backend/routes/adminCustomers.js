@@ -66,12 +66,14 @@ router.get('/', adminAuth, async (req, res) => {
 
 // GET /api/admin/customers/stats
 router.get('/stats', adminAuth, async (req, res) => {
-  const { count: total }   = await db.prepare("SELECT COUNT(DISTINCT nic) as count FROM orders").get()
-  const { count: repeat }  = await db.prepare("SELECT COUNT(*) as count FROM (SELECT nic FROM orders GROUP BY nic HAVING COUNT(*) > 1)").get()
-  const topSpend           = await db.prepare("SELECT full_name, nic, SUM(total) as spent FROM orders GROUP BY nic ORDER BY spent DESC LIMIT 1").get()
-  const { count: vipCount} = await db.prepare(`SELECT COUNT(*) as count FROM (
-    SELECT nic FROM orders GROUP BY nic ORDER BY SUM(total) DESC LIMIT MAX(1, CAST(COUNT(DISTINCT nic)*0.1 AS INT))
-  )`).get()
+  const { count: total }  = await db.prepare("SELECT COUNT(DISTINCT nic) as count FROM orders").get()
+  const { count: repeat } = await db.prepare("SELECT COUNT(*) as count FROM (SELECT nic FROM orders GROUP BY nic HAVING COUNT(*) > 1)").get()
+  const topSpend          = await db.prepare("SELECT full_name, nic, SUM(total) as spent FROM orders GROUP BY nic ORDER BY spent DESC LIMIT 1").get()
+
+  // Turso doesn't support aggregate functions inside LIMIT — calculate VIP count in JS
+  const nicTotals = await db.prepare("SELECT nic, SUM(total) as spent FROM orders GROUP BY nic ORDER BY spent DESC").all()
+  const vipCount  = Math.max(1, Math.ceil(nicTotals.length * 0.1))
+
   res.json({ total, repeat, topSpend, vipCount })
 })
 
