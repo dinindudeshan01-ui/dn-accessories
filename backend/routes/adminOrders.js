@@ -13,7 +13,6 @@ async function logOrderCogs(order) {
   const saleDate = new Date(order.created_at).toISOString().split('T')[0]
   let totalCogs  = 0
 
-  // Fetch all products in parallel
   const products = await Promise.all(
     items.map(item =>
       item.id
@@ -22,7 +21,6 @@ async function logOrderCogs(order) {
     )
   )
 
-  // Fetch all recipes in parallel (only for found products)
   const recipes = await Promise.all(
     products.map(product =>
       product
@@ -36,7 +34,6 @@ async function logOrderCogs(order) {
     )
   )
 
-  // Build all inserts + stock updates into one batch
   const batchStatements = []
 
   for (let i = 0; i < items.length; i++) {
@@ -88,14 +85,13 @@ async function logOrderCogs(order) {
     })
   }
 
-  // Mark order as logged
   batchStatements.push({
     sql:  'UPDATE orders SET cogs_logged = 1 WHERE id = ?',
     args: [order.id],
   })
 
   if (batchStatements.length) {
-    await client.batch(batchStatements, 'write')
+    await db.batch(batchStatements, 'write')  // ✅ fixed
   }
 
   return totalCogs
@@ -118,7 +114,7 @@ async function reverseOrderCogs(order) {
   batchStatements.push({ sql: 'UPDATE orders SET cogs_logged = 0 WHERE id = ?', args: [order.id] })
 
   if (batchStatements.length) {
-    await client.batch(batchStatements, 'write')
+    await db.batch(batchStatements, 'write')  // ✅ fixed
   }
 }
 
