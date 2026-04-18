@@ -26,9 +26,10 @@ const upload = multer({
 // ── Helper: upload buffer to Cloudinary ──────────────────────
 function uploadToCloudinary(buffer, mimetype) {
   return new Promise((resolve, reject) => {
-    const uniqueName   = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     const isPdf        = mimetype === 'application/pdf'
     const resourceType = isPdf ? 'raw' : 'image'
+    const ext          = isPdf ? '.pdf' : ''
+    const uniqueName   = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${ext}`
 
     const stream = cloudinary.uploader.upload_stream(
       {
