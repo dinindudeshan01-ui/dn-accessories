@@ -20,10 +20,9 @@ const T = {
   font:    "'DM Sans', 'Segoe UI', system-ui, sans-serif",
 }
 
-// ── QB-style grouped nav ──────────────────────────────────────
 const NAV_GROUPS = [
   {
-    label: null, // no section label for top item
+    label: null,
     items: [
       { to: '/admin', label: 'Dashboard', icon: '◈', end: true },
     ]
@@ -31,8 +30,8 @@ const NAV_GROUPS = [
   {
     label: 'Sales',
     items: [
-      { to: '/admin/orders',   label: 'Orders',    icon: '◳' },
-      { to: '/admin/customers',label: 'Customers', icon: '◉' },
+      { to: '/admin/orders',    label: 'Orders',    icon: '◳' },
+      { to: '/admin/customers', label: 'Customers', icon: '◉' },
     ]
   },
   {
@@ -59,16 +58,17 @@ const NAV_GROUPS = [
   {
     label: 'Reports',
     items: [
-      { to: '/admin/pl',        label: 'P & L',     icon: '▣' },
-      { to: '/admin/inventory-report', label: 'Inventory', icon: '▤' },
+      { to: '/admin/pl',               label: 'P & L',      icon: '▣' },
+      { to: '/admin/cashflow',         label: 'Cash Flow',  icon: '◈' },
+      { to: '/admin/inventory-report', label: 'Inventory',  icon: '▤' },
     ]
   },
   {
     label: 'System',
     items: [
-      { to: '/admin/studio',    label: 'Studio',    icon: '◑' },
-      { to: '/admin/audit',     label: 'Audit Log', icon: '◨' },
-      { to: '/admin/reset',     label: 'Data Reset',icon: '⚠', danger: true },
+      { to: '/admin/studio',  label: 'Studio',     icon: '◑' },
+      { to: '/admin/audit',   label: 'Audit Log',  icon: '◨' },
+      { to: '/admin/reset',   label: 'Data Reset', icon: '⚠', danger: true },
     ]
   },
 ]
