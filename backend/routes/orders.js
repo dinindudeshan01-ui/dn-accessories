@@ -29,7 +29,8 @@ function uploadToCloudinary(buffer, mimetype) {
       {
         folder:        'dn-accessories/slips',
         public_id:     uniqueName,
-        resource_type: isPdf ? 'raw' : 'image',
+        resource_type: 'image',
+        ...(isPdf ? { format: 'jpg', pages: 1 } : {}),
         access_mode:   'public',
       },
       (error, result) => {
