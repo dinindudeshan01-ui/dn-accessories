@@ -1,17 +1,15 @@
 const express    = require('express')
-const router     = express.Router()
+const router     = require('express').Router()
 const db         = require('../db')
 const multer     = require('multer')
 const cloudinary = require('cloudinary').v2
 
-// ── Cloudinary config ─────────────────────────────────────────
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dexbftjks',
   api_key:    process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
 
-// ── Multer — memory storage (no disk) ────────────────────────
 const ALLOWED_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf']
 
 const upload = multer({
@@ -23,15 +21,16 @@ const upload = multer({
   }
 })
 
-// ── Helper: upload buffer to Cloudinary ──────────────────────
-function uploadToCloudinary(buffer) {
+function uploadToCloudinary(buffer, mimetype) {
   return new Promise((resolve, reject) => {
     const uniqueName = `slip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const isPdf      = mimetype === 'application/pdf'
     const stream = cloudinary.uploader.upload_stream(
       {
         folder:        'dn-accessories/slips',
         public_id:     uniqueName,
-        resource_type: 'image', // handles both images and PDFs (converts PDF page 1 to image)
+        resource_type: isPdf ? 'raw' : 'image',
+        access_mode:   'public',
       },
       (error, result) => {
         if (error) return reject(error)
@@ -42,7 +41,6 @@ function uploadToCloudinary(buffer) {
   })
 }
 
-// ── GET all orders ────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
     const orders = await db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all()
@@ -50,7 +48,6 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-// ── POST new order ────────────────────────────────────────────
 router.post('/', upload.single('slip'), async (req, res) => {
   try {
     const { full_name, nic, phone1, phone2, address, city, items_json, total, bank_used } = req.body
@@ -60,7 +57,7 @@ router.post('/', upload.single('slip'), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: 'Payment slip is required' })
 
-    const slipUrl = await uploadToCloudinary(req.file.buffer)
+    const slipUrl = await uploadToCloudinary(req.file.buffer, req.file.mimetype)
 
     const result = await db.prepare(`
       INSERT INTO orders (full_name, nic, phone1, phone2, address, city, total, items_json, slip_path, bank_used, status)
