@@ -141,7 +141,7 @@ router.get('/', adminAuth, async (req, res) => {
     res.json(orders.map(o => ({
       ...o,
       items:    JSON.parse(o.items_json || '[]'),
-      slip_url: o.slip_path ? `${BASE_URL}/uploads/slips/${o.slip_path}` : null,
+      slip_url: o.slip_path || null,
     })))
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
