@@ -1,11 +1,17 @@
+// backend/routes/adminSystem.js
+
 const express   = require('express')
 const router    = express.Router()
 const db        = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
 const { auditLog } = require('../middleware/auditLog')
+
+const ownerOnly = requireRole('*')
 
 // ── AUDIT LOG ─────────────────────────────────────────────────
 
+// Anyone authenticated can VIEW the audit log
 router.get('/audit', adminAuth, async (req, res) => {
   try {
     const { limit = 100, entity, action, search } = req.query
@@ -32,16 +38,31 @@ router.get('/audit/stats', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.delete('/audit/clear', adminAuth, async (req, res) => {
+// 🔒 OWNER ONLY — was just adminAuth before (anyone could clear it)
+router.delete('/audit/clear', ownerOnly, async (req, res) => {
   try {
+    const countRow = await db.prepare('SELECT COUNT(*) as count FROM audit_log').get()
     await db.prepare('DELETE FROM audit_log').run()
+
+    // Log the clear action itself (this will be the first entry after the wipe)
+    await auditLog({
+      req,
+      action:      'DELETE',
+      entity:      'audit_log',
+      entityId:    null,
+      description: `Audit log cleared by ${req.admin.email} — ${countRow.count} records deleted`,
+      oldValue:    { count: countRow.count },
+      newValue:    { count: 0 },
+    })
+
     res.json({ ok: true, message: 'Audit log cleared' })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 // ── RESET ─────────────────────────────────────────────────────
 
-router.post('/reset', adminAuth, async (req, res) => {
+// 🔒 OWNER ONLY — was just adminAuth before
+router.post('/reset', ownerOnly, async (req, res) => {
   const { targets, confirm } = req.body
   if (confirm !== 'RESET') return res.status(400).json({ error: 'Type RESET to confirm' })
   if (!targets || !Array.isArray(targets) || targets.length === 0)
@@ -136,7 +157,6 @@ router.get('/archives/:table', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-module.exports = router
 // ── GLOBAL SEARCH ─────────────────────────────────────────────
 
 router.get('/search', adminAuth, async (req, res) => {
@@ -181,3 +201,5 @@ router.get('/search', adminAuth, async (req, res) => {
     res.json({ orders, products, bills, customers })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
+
+module.exports = router

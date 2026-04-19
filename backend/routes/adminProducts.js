@@ -2,6 +2,8 @@ const express = require('express')
 const router  = express.Router()
 const db      = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
+const managerOnly = requireRole('products')
 const { auditLog } = require('../middleware/auditLog')
 
 router.get('/', adminAuth, async (req, res) => {
@@ -11,7 +13,7 @@ router.get('/', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.post('/', adminAuth, async (req, res) => {
+router.post('/', managerOnly, async (req, res) => {
   try {
     const { name, price, description, image_url, category, subcategory, stock } = req.body
     if (!name || !price) return res.status(400).json({ error: 'Name and price required' })
@@ -38,7 +40,7 @@ router.post('/', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.patch('/reorder', adminAuth, async (req, res) => {
+router.patch('/reorder', managerOnly, async (req, res) => {
   try {
     const { groups } = req.body
     if (!Array.isArray(groups) || groups.length === 0)
@@ -56,7 +58,7 @@ router.patch('/reorder', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.put('/:id', adminAuth, async (req, res) => {
+router.put('/:id', managerOnly, async (req, res) => {
   try {
     const { name, price, description, image_url, category, subcategory, stock } = req.body
     const old = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
@@ -87,7 +89,7 @@ router.put('/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.delete('/:id', adminAuth, async (req, res) => {
+router.delete('/:id', managerOnly, async (req, res) => {
   try {
     const old = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
     if (!old) return res.status(404).json({ error: 'Not found' })
@@ -98,7 +100,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.patch('/:id/stock', adminAuth, async (req, res) => {
+router.patch('/:id/stock', managerOnly, async (req, res) => {
   try {
     const { stock } = req.body
     const old = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)

@@ -2,6 +2,8 @@ const express   = require('express')
 const router    = express.Router()
 const db        = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
+const managerOnly = requireRole('materials')
 const { auditLog } = require('../middleware/auditLog')
 
 router.get('/', adminAuth, async (req, res) => {
@@ -31,7 +33,7 @@ router.get('/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.post('/', adminAuth, async (req, res) => {
+router.post('/', managerOnly, async (req, res) => {
   try {
     const { name, unit, opening_stock, opening_cost, reorder_level, notes } = req.body
     if (!name || !unit) return res.status(400).json({ error: 'Name and unit required' })
@@ -58,7 +60,7 @@ router.post('/', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.put('/:id', adminAuth, async (req, res) => {
+router.put('/:id', managerOnly, async (req, res) => {
   try {
     const { name, unit, reorder_level, notes } = req.body
     const old = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id)
@@ -71,7 +73,7 @@ router.put('/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.delete('/:id', adminAuth, async (req, res) => {
+router.delete('/:id', managerOnly, async (req, res) => {
   try {
     const old = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id)
     if (!old) return res.status(404).json({ error: 'Not found' })
@@ -84,7 +86,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-router.post('/units/add', adminAuth, async (req, res) => {
+router.post('/units/add', managerOnly, async (req, res) => {
   try {
     const { name } = req.body
     if (!name) return res.status(400).json({ error: 'Unit name required' })

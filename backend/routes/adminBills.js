@@ -2,6 +2,8 @@ const express   = require('express')
 const router    = express.Router()
 const db        = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
+const financeOnly = requireRole('finance')
 const { auditLog } = require('../middleware/auditLog')
 const multer    = require('multer')
 const path      = require('path')
@@ -152,7 +154,7 @@ router.get('/:id', adminAuth, async (req, res) => {
 })
 
 // ── POST create bill ──────────────────────────────────────────
-router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
+router.post('/', financeOnly, upload.single('bill_image'), async (req, res) => {
   try {
     const { supplier_id, bill_date, due_date, notes } = req.body
     let items = []
@@ -228,7 +230,7 @@ router.post('/', adminAuth, upload.single('bill_image'), async (req, res) => {
 // ── PUT edit bill ─────────────────────────────────────────────
 // Unpaid  → full reverse old items, apply new items, recalc stock/costs
 // Paid / Partial → amendment only: supplier, due_date, notes (no stock change)
-router.put('/:id', adminAuth, async (req, res) => {
+router.put('/:id', financeOnly, async (req, res) => {
   try {
     const billId = req.params.id
     const bill   = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(billId)
@@ -349,7 +351,7 @@ router.put('/:id', adminAuth, async (req, res) => {
 })
 
 // ── POST record payment against a bill ───────────────────────
-router.post('/:id/pay', adminAuth, async (req, res) => {
+router.post('/:id/pay', financeOnly, async (req, res) => {
   const { amount, payment_date, payment_method, bank_account, notes } = req.body
   const bill = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
   if (!bill) return res.status(404).json({ error: 'Bill not found' })
@@ -387,7 +389,7 @@ router.post('/:id/pay', adminAuth, async (req, res) => {
 })
 
 // ── POST void a payment (payment reversal) ────────────────────
-router.post('/:id/payments/:paymentId/void', adminAuth, async (req, res) => {
+router.post('/:id/payments/:paymentId/void', financeOnly, async (req, res) => {
   try {
     const { reason } = req.body
     if (!reason || !reason.trim()) return res.status(400).json({ error: 'Void reason is required' })
@@ -434,7 +436,7 @@ router.post('/:id/payments/:paymentId/void', adminAuth, async (req, res) => {
 })
 
 // ── DELETE bill ───────────────────────────────────────────────
-router.delete('/:id', adminAuth, async (req, res) => {
+router.delete('/:id', financeOnly, async (req, res) => {
   const bill = await db.prepare('SELECT * FROM purchase_bills WHERE id = ?').get(req.params.id)
   if (!bill) return res.status(404).json({ error: 'Not found' })
   if (bill.status !== 'unpaid') return res.status(400).json({ error: 'Cannot delete a paid or partial bill' })

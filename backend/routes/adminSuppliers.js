@@ -2,6 +2,8 @@ const express   = require('express')
 const router    = express.Router()
 const db        = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
+const managerOnly = requireRole('suppliers')
 const { auditLog } = require('../middleware/auditLog')
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001'
@@ -49,7 +51,7 @@ router.get('/:id', adminAuth, async (req, res) => {
 })
 
 // ── POST create supplier ──────────────────────────────────────
-router.post('/', adminAuth, async (req, res) => {
+router.post('/', managerOnly, async (req, res) => {
   const { name, category, contact, email, address, lead_days, opening_balance, notes } = req.body
   if (!name) return res.status(400).json({ error: 'Supplier name required' })
 
@@ -73,7 +75,7 @@ router.post('/', adminAuth, async (req, res) => {
 })
 
 // ── PUT update supplier ───────────────────────────────────────
-router.put('/:id', adminAuth, async (req, res) => {
+router.put('/:id', managerOnly, async (req, res) => {
   const { name, category, contact, email, address, lead_days, opening_balance, status, notes } = req.body
   const old = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
@@ -96,7 +98,7 @@ router.put('/:id', adminAuth, async (req, res) => {
 })
 
 // ── DELETE supplier ───────────────────────────────────────────
-router.delete('/:id', adminAuth, async (req, res) => {
+router.delete('/:id', managerOnly, async (req, res) => {
   const old = await db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
 

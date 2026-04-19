@@ -2,7 +2,10 @@ const express   = require('express')
 const router    = express.Router()
 const db        = require('../db')
 const adminAuth = require('../middleware/adminAuth')
+const { requireRole } = require('../middleware/adminAuth')
 const { auditLog } = require('../middleware/auditLog')
+
+const financeOnly = requireRole('finance')
 
 // ── EXPENSES ──────────────────────────────────────────────────
 
@@ -14,7 +17,8 @@ router.get('/expenses', adminAuth, async (req, res) => {
   res.json(expenses)
 })
 
-router.post('/expenses', adminAuth, async (req, res) => {
+// 🔒 finance role required
+router.post('/expenses', financeOnly, async (req, res) => {
   const { description, category, amount, date } = req.body
   if (!description || !amount) return res.status(400).json({ error: 'Missing fields' })
   const result = await db.prepare(
@@ -25,7 +29,8 @@ router.post('/expenses', adminAuth, async (req, res) => {
   res.json(expense)
 })
 
-router.put('/expenses/:id', adminAuth, async (req, res) => {
+// 🔒 finance role required
+router.put('/expenses/:id', financeOnly, async (req, res) => {
   try {
     const old = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
     if (!old) return res.status(404).json({ error: 'Not found' })
@@ -53,7 +58,8 @@ router.put('/expenses/:id', adminAuth, async (req, res) => {
   }
 })
 
-router.delete('/expenses/:id', adminAuth, async (req, res) => {
+// 🔒 finance role required
+router.delete('/expenses/:id', financeOnly, async (req, res) => {
   const old = await db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id)
   if (!old) return res.status(404).json({ error: 'Not found' })
   await db.prepare('INSERT INTO archive_expenses (original_id, data_json, deleted_by_email) VALUES (?,?,?)').run(old.id, JSON.stringify(old), req.admin.email)
@@ -229,7 +235,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
   try {
     const { month } = req.query
 
-    // ── Cash in: orders confirmed this period ─────────────────
     const cashInRow = month
       ? await db.prepare(`
           SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count
@@ -244,7 +249,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
         `).get()
     const cashIn = Number(cashInRow?.total ?? 0)
 
-    // ── Cash out: bill payments made this period ──────────────
     const billPayRow = month
       ? await db.prepare(`
           SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
@@ -259,7 +263,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
         `).get()
     const billPayments = Number(billPayRow?.total ?? 0)
 
-    // ── Cash out: expenses this period ────────────────────────
     const expRow = month
       ? await db.prepare(`
           SELECT COALESCE(SUM(amount), 0) as total
@@ -275,7 +278,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
     const totalCashOut = billPayments + expensesPaid
     const netCashFlow  = cashIn - totalCashOut
 
-    // ── Daily cash flow for chart ─────────────────────────────
     const daily = month
       ? await db.prepare(`
           SELECT day, SUM(cash_in) as cash_in, SUM(cash_out) as cash_out
@@ -306,7 +308,6 @@ router.get('/cashflow', adminAuth, async (req, res) => {
           GROUP BY day ORDER BY day ASC
         `).all()
 
-    // ── AP outstanding (unpaid bills) ─────────────────────────
     const apRow = await db.prepare(`
       SELECT COALESCE(SUM(b.total - COALESCE(bp.paid,0)), 0) as outstanding
       FROM purchase_bills b
