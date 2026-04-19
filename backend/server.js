@@ -1,3 +1,6 @@
+// backend/server.js
+// UPDATED — added /api/admin/staff route
+
 require('dotenv').config()
 const express = require('express')
 const cors    = require('cors')
@@ -11,7 +14,6 @@ app.use(cors({
     'http://localhost:5173',
     'http://localhost:4173',
     'http://localhost:5175',
-
   ]
 }))
 app.use(express.json())
@@ -36,13 +38,13 @@ app.use('/api/admin/bills',     require('./routes/adminBills'))
 app.use('/api/admin/recipes',   require('./routes/adminRecipes'))
 app.use('/api/admin/suppliers', require('./routes/adminSuppliers'))
 app.use('/api/admin/customers', require('./routes/adminCustomers'))
+app.use('/api/admin/staff',     require('./routes/adminStaff'))      // NEW
 
 // ── Health ────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', version: 'v13-turso' }))
+app.get('/api/health', (req, res) => res.json({ status: 'ok', version: 'v14-staff' }))
 
 const PORT = process.env.PORT || 3001
 
-// Init DB first, then start server
 db.init().then(() => {
   app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`))
 }).catch(err => {

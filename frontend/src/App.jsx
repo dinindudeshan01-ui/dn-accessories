@@ -1,3 +1,6 @@
+// frontend/src/App.jsx
+// UPDATED — added AdminStaff import and route
+
 import { Routes, Route } from 'react-router-dom'
 import { CartProvider }  from './context/CartContext'
 import { AdminProvider } from './context/AdminContext'
@@ -21,13 +24,14 @@ import AdminRecipes   from './pages/admin/AdminRecipes'
 import AdminBills     from './pages/admin/AdminBills'
 import AdminSuppliers from './pages/admin/AdminSuppliers'
 import AdminExpenses  from './pages/admin/AdminExpenses'
-import AdminPL               from './pages/admin/AdminPL'
-import AdminCashFlow         from './pages/admin/AdminCashFlow'
-import AdminInventoryReport  from './pages/admin/AdminInventoryReport'
+import AdminPL              from './pages/admin/AdminPL'
+import AdminCashFlow        from './pages/admin/AdminCashFlow'
+import AdminInventoryReport from './pages/admin/AdminInventoryReport'
 import AdminStudio   from './pages/admin/AdminStudio'
 import AdminAuditLog from './pages/admin/AdminAuditLog'
 import AdminReset    from './pages/admin/AdminReset'
 import AdminSettings from './pages/admin/AdminSettings'
+import AdminStaff    from './pages/admin/AdminStaff'   // NEW
 
 export default function App() {
   return (
@@ -61,6 +65,7 @@ export default function App() {
             <Route path="audit"   element={<AdminAuditLog />} />
             <Route path="reset"   element={<AdminReset />}    />
             <Route path="settings" element={<AdminSettings />} />
+            <Route path="staff"    element={<AdminStaff />}   />   {/* NEW */}
           </Route>
         </Routes>
       </AdminProvider>

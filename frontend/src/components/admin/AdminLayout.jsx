@@ -1,12 +1,11 @@
-// src/components/admin/AdminLayout.jsx
-// Phase 4 — Mobile-responsive sidebar: hamburger, slide-in drawer, bottom tab bar
+// frontend/src/components/admin/AdminLayout.jsx
+// UPDATED — added Staff link under System nav group
 
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAdmin } from '../../context/AdminContext'
 import { useEffect, useState } from 'react'
 import GlobalSearch from './GlobalSearch'
 
-// ── Theme hook (persists in localStorage, respects OS on first load) ──────────
 function useAdminTheme() {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('dn_admin_theme')
@@ -82,6 +81,7 @@ const NAV_GROUPS = [
   {
     label: 'System',
     items: [
+      { to: '/admin/staff',    label: 'Staff',      icon: '◉' },   // NEW
       { to: '/admin/settings', label: 'Settings',   icon: '◧' },
       { to: '/admin/studio',   label: 'Studio',     icon: '◑' },
       { to: '/admin/audit',    label: 'Audit Log',  icon: '◨' },
@@ -90,7 +90,6 @@ const NAV_GROUPS = [
   },
 ]
 
-// Bottom tab bar — 5 most used pages
 const BOTTOM_TABS = [
   { to: '/admin',           label: 'Home',     icon: '◈', end: true },
   { to: '/admin/orders',    label: 'Orders',   icon: '◳' },
@@ -137,10 +136,8 @@ const GLOBAL = `
   .dn-btn:active    { transform:scale(.97); }
   .dn-slide-up      { animation: dn-slide-up 0.32s ease both; }
 
-  /* Mobile drawer animation */
   .dn-drawer { animation: dn-drawer-in 0.25s cubic-bezier(0.32,0.72,0,1) both; }
 
-  /* Desktop: show sidebar, hide hamburger + bottom tabs */
   @media (min-width: 769px) {
     .dn-hamburger    { display: none !important; }
     .dn-bottom-tabs  { display: none !important; }
@@ -148,7 +145,6 @@ const GLOBAL = `
     .dn-drawer-overlay { display: none !important; }
   }
 
-  /* Mobile: hide desktop sidebar, show hamburger + bottom tabs */
   @media (max-width: 768px) {
     .dn-sidebar-desk { display: none !important; }
     .dn-hamburger    { display: flex !important; }
@@ -165,7 +161,6 @@ function injectStyles() {
   document.head.appendChild(el)
 }
 
-// ── Sidebar content (shared between desktop sidebar + mobile drawer) ──────────
 function SidebarContent({ admin, onLogout, onSearchOpen, onClose, onThemeToggle, currentTheme }) {
   return (
     <>
@@ -209,7 +204,7 @@ function SidebarContent({ admin, onLogout, onSearchOpen, onClose, onThemeToggle,
           <span style={{ fontSize: 9, fontWeight: 700, color: T.lime, letterSpacing: '0.08em' }}>LIVE</span>
         </div>
 
-        {/* Search button (Cmd+K) */}
+        {/* Search button */}
         <button
           onClick={onSearchOpen}
           style={{
@@ -329,8 +324,6 @@ export default function AdminLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => { injectStyles() }, [])
-
-  // Close drawer on route change
   useEffect(() => { setDrawerOpen(false) }, [location.pathname])
 
   function handleLogout() {
@@ -346,10 +339,9 @@ export default function AdminLayout() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: T.bg, fontFamily: T.font }}>
 
-      {/* ── Global Search overlay (Cmd+K) ── */}
       <GlobalSearch />
 
-      {/* ── Desktop Sidebar ── */}
+      {/* Desktop Sidebar */}
       <aside
         className="dn-sidebar-desk"
         style={{
@@ -370,7 +362,7 @@ export default function AdminLayout() {
         />
       </aside>
 
-      {/* ── Mobile Drawer Overlay ── */}
+      {/* Mobile Drawer Overlay */}
       {drawerOpen && (
         <div
           className="dn-drawer-overlay"
@@ -383,7 +375,7 @@ export default function AdminLayout() {
         />
       )}
 
-      {/* ── Mobile Drawer ── */}
+      {/* Mobile Drawer */}
       {drawerOpen && (
         <aside
           className="dn-drawer"
@@ -396,7 +388,6 @@ export default function AdminLayout() {
             overflowY: 'auto',
           }}
         >
-          {/* Close button */}
           <button
             onClick={() => setDrawerOpen(false)}
             style={{
@@ -417,16 +408,16 @@ export default function AdminLayout() {
         </aside>
       )}
 
-      {/* ── Main content ── */}
+      {/* Main content */}
       <main
         className="dn-main-content"
         style={{ flex: 1, overflow: 'auto', minWidth: 0, position: 'relative' }}
       >
-        {/* ── Mobile top bar (hamburger) ── */}
+        {/* Mobile top bar */}
         <div
           className="dn-hamburger"
           style={{
-            display: 'none', // overridden by media query
+            display: 'none',
             position: 'sticky', top: 0, zIndex: 100,
             alignItems: 'center', gap: 12,
             padding: '12px 16px',
@@ -451,7 +442,6 @@ export default function AdminLayout() {
             <span style={{ display: 'block', width: 16, height: 1.5, background: T.text, borderRadius: 1 }} />
           </button>
 
-          {/* Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{
               width: 26, height: 26, borderRadius: 7,
@@ -464,7 +454,6 @@ export default function AdminLayout() {
             </span>
           </div>
 
-          {/* Search icon */}
           <button
             onClick={openSearch}
             style={{
@@ -481,11 +470,11 @@ export default function AdminLayout() {
         <Outlet />
       </main>
 
-      {/* ── Mobile Bottom Tab Bar ── */}
+      {/* Mobile Bottom Tab Bar */}
       <nav
         className="dn-bottom-tabs"
         style={{
-          display: 'none', // overridden by media query
+          display: 'none',
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
           background: T.sidebar,
           borderTop: `1px solid ${T.border}`,
